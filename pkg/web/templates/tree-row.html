@@ -1,0 +1,13 @@
+{{define "tree-row.html"}}
+<li role="treeitem"
+    aria-level="{{.Level}}"
+    aria-setsize="{{.SetSize}}"
+    aria-posinset="{{.PosInSet}}"
+    {{if .HasChildren}}aria-expanded="false"{{end}}
+    data-dn="{{.DN}}">
+  <span class="tree-label">{{.Label}}</span>
+  {{if .HasChildren}}
+  <button type="button" class="tree-toggle" aria-label="Toggle children of {{.Label}}">▸</button>
+  {{end}}
+</li>
+{{end}}

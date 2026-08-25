@@ -41,3 +41,20 @@ unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
 - Unit tests via a fake connection interface (no Docker required); integration
   tests against testcontainers-go OpenLDAP 2.6 that skip cleanly when Docker is
   unavailable.
+
+## U4 — HTML template infrastructure, embed, ARIA helpers, static assets
+
+- `pkg/web`: html/template parsing from an embedded FS (panic-on-parse-failure
+  at startup), base FuncMap (dict/join/safeHTML), Renderer for full pages and
+  HTMX fragments; layout shell with skip link, `role="main"`, `role="contentinfo"`,
+  WCAG 2.1 AA CSS primitives (focus-visible rings, prefers-reduced-motion,
+  24px touch targets).
+- `static/`: HTMX 2.0.4, main/tree/forms CSS, `tree-keys.js` (full ARIA tree
+  keyboard navigation with a transport-agnostic loader hook for U5),
+  `autofill.js` (`%var|start-end/modifier%` runtime for R8 autoFill).
+- Root `templates/`: `template.dtd` + creation/modification XML corpus copied
+  verbatim from the phpLDAPadmin oracle (plan invariant; verified byte-identical).
+- `/static/` served from the embedded FS (`Cache-Control: public, max-age=300`);
+  XML templates are embedded but never exposed over HTTP.
+- JS unit tests run under Node (`make test-js`): autofill token grammar and
+  tree keyboard behavior via a minimal DOM shim.

@@ -1,0 +1,30 @@
+{{define "layout.html"}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{block "title" .}}ldapact{{end}}</title>
+  <link rel="stylesheet" href="/static/css/main.css">
+  <link rel="stylesheet" href="/static/css/tree.css">
+  <link rel="stylesheet" href="/static/css/forms.css">
+  {{block "head" .}}{{end}}
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <header class="site-header" role="banner">
+    <span class="site-title">ldapact</span>
+  </header>
+  <main id="main-content" role="main" class="site-main" tabindex="-1">
+    {{template "content" .}}
+  </main>
+  <footer class="site-footer" role="contentinfo">
+    <p>ldapact — LDAP administration</p>
+  </footer>
+  <script src="/static/htmx.min.js"></script>
+  <script src="/static/js/tree-keys.js"></script>
+  <script src="/static/js/autofill.js"></script>
+  {{block "scripts" .}}{{end}}
+</body>
+</html>
+{{end}}

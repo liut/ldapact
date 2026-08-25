@@ -1,0 +1,119 @@
+/* ldapact base styles — WCAG 2.1 AA primitives (R18). */
+
+:root {
+  --color-bg: #ffffff;
+  --color-text: #1a1a1a;
+  --color-muted: #5a5a5a;
+  --color-accent: #1b4f8a;
+  --color-focus: #c9680b;
+  --color-error: #a01b1b;
+  --color-error-bg: #fdecea;
+  --font-size-base: 16px;
+  --min-touch-target: 24px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: var(--font-size-base);
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.5;
+  color: var(--color-text);
+  background: var(--color-bg);
+}
+
+a {
+  color: var(--color-accent);
+}
+
+/* Visible focus ring (R18): never rely on default outline removal. */
+:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Skip link: visually hidden until focused. */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  padding: 0.5rem 1rem;
+  background: var(--color-accent);
+  color: #fff;
+  border-radius: 0 0 4px 0;
+}
+
+.skip-link:focus {
+  left: 0;
+}
+
+.site-header {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #ddd;
+  background: #f7f7f7;
+}
+
+.site-title {
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+.site-main {
+  padding: 1rem;
+  min-height: calc(100vh - 8rem);
+}
+
+.site-main:focus {
+  outline: none;
+}
+
+.site-footer {
+  padding: 0.75rem 1rem;
+  border-top: 1px solid #ddd;
+  color: var(--color-muted);
+  font-size: 0.9rem;
+}
+
+.status-region {
+  margin: 0.5rem 0;
+  color: var(--color-muted);
+}
+
+.error-box {
+  margin: 0.5rem 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--color-error);
+  border-radius: 4px;
+  background: var(--color-error-bg);
+  color: var(--color-error);
+}
+
+/* Touch targets >= 24x24 CSS px (R18). */
+button,
+a,
+input,
+select,
+textarea,
+[role="treeitem"] {
+  min-height: var(--min-touch-target);
+}
+
+/* Respect users who prefer reduced motion (R18). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

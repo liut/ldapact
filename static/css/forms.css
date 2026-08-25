@@ -1,0 +1,84 @@
+/* Forms and multi-page wizard styles (F2/F3). */
+
+form fieldset {
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+}
+
+form label {
+  display: block;
+  margin: 0.5rem 0 0.2rem;
+  font-weight: 600;
+}
+
+form input,
+form select,
+form textarea {
+  display: block;
+  width: 100%;
+  max-width: 36rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid #999;
+  border-radius: 4px;
+  font: inherit;
+  min-height: 2rem;
+}
+
+form input[aria-invalid="true"] {
+  border-color: var(--color-error);
+  box-shadow: 0 0 0 1px var(--color-error);
+}
+
+.field-error {
+  color: var(--color-error);
+  font-size: 0.9rem;
+  margin: 0.2rem 0;
+}
+
+.step-indicator {
+  display: flex;
+  gap: 0.5rem;
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1rem;
+}
+
+.step-indicator li {
+  padding: 0.3rem 0.7rem;
+  border: 1px solid #bbb;
+  border-radius: 999px;
+  color: var(--color-muted);
+}
+
+.step-indicator li[aria-current="step"] {
+  border-color: var(--color-accent);
+  background: #eef4fb;
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.form-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+button.primary {
+  background: var(--color-accent);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 0.5rem 1.25rem;
+  cursor: pointer;
+}
+
+button.secondary {
+  background: #fff;
+  color: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  border-radius: 4px;
+  padding: 0.5rem 1.25rem;
+  cursor: pointer;
+}

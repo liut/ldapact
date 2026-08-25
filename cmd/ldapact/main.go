@@ -11,11 +11,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/liut/ldapact"
 	"github.com/liut/ldapact/pkg/authn"
 	"github.com/liut/ldapact/pkg/config"
 	"github.com/liut/ldapact/pkg/logging"
 	"github.com/liut/ldapact/pkg/ratelimit"
 	"github.com/liut/ldapact/pkg/secheaders"
+	"github.com/liut/ldapact/pkg/web"
 )
 
 var (
@@ -99,14 +101,19 @@ func run(args []string) int {
 // headers -> csrf -> rate limit -> routes). Session middleware joins in U3.
 func newHandler(logger *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
+	renderer := web.New(web.MustParse(nil))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintln(w, `{"status":"ok"}`)
 	})
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprintln(w, `<!doctype html><html><head><title>ldapact</title></head><body><h1>ldapact</h1><p>v1 skeleton is up; LDAP flows land in later units.</p></body></html>`)
+		if err := renderer.Page(w, "layout.html", nil); err != nil {
+			logger.Error("render home page", "event", "web.render_failed", "error", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
 	})
+	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(ldapact.Assets())))
 
 	var h http.Handler = mux
 	h = ratelimit.New(60, 120).Handler(h)

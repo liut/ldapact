@@ -5,13 +5,17 @@ VERSION ?= dev
 GOWORK ?= off
 export GOWORK
 
-.PHONY: build test lint fmt vet staticcheck run clean
+.PHONY: build test test-js lint fmt vet staticcheck run clean
 
 build:
 	CGO_ENABLED=0 $(GO) build -trimpath -o $(BIN) -ldflags "-X main.version=$(VERSION)" ./cmd/ldapact
 
 test:
 	$(GO) test ./...
+
+test-js:
+	node test/js/autofill_test.js
+	node test/js/tree_keys_test.js
 
 lint: fmt vet staticcheck
 
