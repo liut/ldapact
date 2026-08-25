@@ -5,6 +5,7 @@ go 1.27.0
 require (
 	github.com/go-ldap/ldap/v3 v3.4.14
 	github.com/testcontainers/testcontainers-go v0.44.0
+	go.etcd.io/bbolt v1.5.0
 	golang.org/x/term v0.45.0
 	gopkg.in/yaml.v3 v3.0.1
 )

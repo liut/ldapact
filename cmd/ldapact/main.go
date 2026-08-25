@@ -2,21 +2,26 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
+	"html"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/liut/ldapact"
 	"github.com/liut/ldapact/pkg/authn"
 	"github.com/liut/ldapact/pkg/config"
+	"github.com/liut/ldapact/pkg/ldapx"
 	"github.com/liut/ldapact/pkg/logging"
 	"github.com/liut/ldapact/pkg/ratelimit"
 	"github.com/liut/ldapact/pkg/secheaders"
+	"github.com/liut/ldapact/pkg/session"
 	"github.com/liut/ldapact/pkg/web"
 )
 
@@ -76,6 +81,34 @@ func run(args []string) int {
 	logger := logging.New(lvl, os.Stdout)
 	disableCoreDumps(logger)
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	ldapClient, err := ldapx.New(ctx, cfg, logger)
+	if err != nil {
+		logger.Error("LDAP startup bind failed (fail-fast, R14)",
+			"event", "ldap.bind.failed",
+			"error", err)
+		return 1
+	}
+	defer ldapClient.Close()
+	logger.Info("LDAP bound",
+		"event", "ldap.bind.ok",
+		"base_dn", cfg.LDAP.BaseDN)
+
+	sessionStore, err := session.NewStore(
+		cfg.Session.DBPath,
+		time.Duration(cfg.Session.TimeoutMinutes)*time.Minute,
+		time.Duration(cfg.Session.AbsoluteTimeoutMinutes)*time.Minute)
+	if err != nil {
+		logger.Error("session store failed to open", "event", "session.store_open_failed", "error", err)
+		return 1
+	}
+	defer sessionStore.Close()
+	stopSweep := make(chan struct{})
+	defer close(stopSweep)
+	go sessionStore.SweepLoop(5*time.Minute, stopSweep)
+
 	logger.Info("starting ldapact",
 		"event", "server.start",
 		"version", version,
@@ -87,19 +120,37 @@ func run(args []string) int {
 
 	srv := &http.Server{
 		Addr:              cfg.Server.Listen,
-		Handler:           newHandler(logger),
+		Handler:           newHandler(appDeps{logger: logger, ldap: ldapClient, store: sessionStore, cfg: cfg}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		logger.Error("server exited", "event", "server.stop", "error", err)
-		return 1
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- srv.ListenAndServe() }()
+	select {
+	case err := <-serveErr:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("server exited", "event", "server.stop", "error", err)
+			return 1
+		}
+	case <-ctx.Done():
+		logger.Info("shutting down", "event", "server.shutdown")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
 	}
 	return 0
 }
 
+// appDeps carries the runtime dependencies into the handler chain.
+type appDeps struct {
+	logger *slog.Logger
+	ldap   *ldapx.Client
+	store  *session.Store
+	cfg    *config.Config
+}
+
 // newHandler assembles the request chain (recover -> request id -> security
-// headers -> csrf -> rate limit -> routes). Session middleware joins in U3.
-func newHandler(logger *slog.Logger) http.Handler {
+// headers -> session -> csrf -> rate limit -> routes).
+func newHandler(deps appDeps) http.Handler {
 	mux := http.NewServeMux()
 	renderer := web.New(web.MustParse(nil))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -109,18 +160,34 @@ func newHandler(logger *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := renderer.Page(w, "layout.html", nil); err != nil {
-			logger.Error("render home page", "event", "web.render_failed", "error", err)
+			deps.logger.Error("render home page", "event", "web.render_failed", "error", err)
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		}
+	})
+	// Minimal landing for the redirect_to_login expired-session action (AE7).
+	// v1 has no credential entry (AE1 auto-bind); the page offers to continue.
+	mux.HandleFunc("GET /login", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		next := r.URL.Query().Get("next")
+		if next == "" {
+			next = "/"
+		}
+		fmt.Fprintf(w, `<!doctype html><html><head><title>Session expired — ldapact</title></head><body><main role="main"><h1>Session expired</h1><p>Your session expired. <a href="%s">Continue to ldapact</a>.</p></main></body></html>`, html.EscapeString(next))
 	})
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(ldapact.Assets())))
 
 	var h http.Handler = mux
 	h = ratelimit.New(60, 120).Handler(h)
-	h = authn.CSRF(logger)(h)
+	h = authn.CSRF(deps.logger)(h)
+	sessOpts := authn.MiddlewareOptions{Store: deps.store, Logger: deps.logger}
+	if deps.cfg != nil {
+		sessOpts.ExpiredAction = deps.cfg.Session.ExpiredAction
+		sessOpts.Profile = deps.cfg.LDAP.BindDN
+	}
+	h = authn.Middleware(sessOpts)(h)
 	h = secheaders.Middleware(h)
 	h = logging.RequestID(h)
-	h = logging.Recover(logger)(h)
+	h = logging.Recover(deps.logger)(h)
 	return h
 }
 

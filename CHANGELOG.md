@@ -58,3 +58,19 @@ unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
   XML templates are embedded but never exposed over HTTP.
 - JS unit tests run under Node (`make test-js`): autofill token grammar and
   tree keyboard behavior via a minimal DOM shim.
+
+## U3 — Session store, cookie security, rotation, auth middleware
+
+- `pkg/session`: bbolt-backed store (0600-enforced, KTD 7) with opaque 256-bit
+  base64url IDs, idle + absolute timeouts, `__Host-LDAPADM_SID` cookie
+  (Secure/HttpOnly/SameSite=Strict/Path=/, no Domain), rotation, per-form data
+  for the F2 wizard, and a 5-minute sweeper.
+- `pkg/authn`: session middleware implementing AE1 auto-login (first request
+  mints a session; no login page), AE7 expiry actions
+  (`retry_bind` re-mints; `redirect_to_login` → `/login?next=...`), malformed
+  cookie rejection (400), store-failure 503, and conservative session rotation
+  before state-changing handlers (documented deviation: header commit order
+  makes post-handler cookie rotation unreliable).
+- `main.go`: fail-fast startup LDAP bind via `ldapx.New` (R14/AE1), session
+  store + sweep loop, signal-aware shutdown; `/healthz` and `/static/` skip
+  session minting; minimal `/login` landing page.
