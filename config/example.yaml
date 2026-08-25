@@ -1,4 +1,6 @@
 # ldapact v1 sample server profile (R12).
+# Every value below can be overridden by an env var: LDAPADM_LISTEN,
+# LDAPADM_URL, LDAPADM_BASE_DN, LDAPADM_BIND_DN (env wins; empty is ignored).
 server:
   listen: "127.0.0.1:8080"
 

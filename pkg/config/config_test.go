@@ -122,6 +122,83 @@ templates_dir: "/etc/ldapact/templates"
 	}
 }
 
+func TestLoadEnvOverridesYAML(t *testing.T) {
+	t.Setenv(ListenEnv, "0.0.0.0:9090")
+	t.Setenv(URLEnv, "ldaps://env.example.com:636")
+	t.Setenv(BaseDNEnv, "dc=env,dc=com")
+	t.Setenv(BindDNEnv, "cn=envadmin,dc=env,dc=com")
+
+	cfg, err := Load(writeTemp(t, "config.yaml", validMinimal))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Server.Listen != "0.0.0.0:9090" {
+		t.Errorf("listen = %q, want env override", cfg.Server.Listen)
+	}
+	if cfg.LDAP.URL != "ldaps://env.example.com:636" {
+		t.Errorf("url = %q, want env override", cfg.LDAP.URL)
+	}
+	if cfg.LDAP.BaseDN != "dc=env,dc=com" {
+		t.Errorf("base_dn = %q, want env override", cfg.LDAP.BaseDN)
+	}
+	if cfg.LDAP.BindDN != "cn=envadmin,dc=env,dc=com" {
+		t.Errorf("bind_dn = %q, want env override", cfg.LDAP.BindDN)
+	}
+}
+
+func TestLoadEnvProvidesMissingFields(t *testing.T) {
+	t.Setenv(ListenEnv, "127.0.0.1:9191")
+	t.Setenv(URLEnv, "ldap://127.0.0.1:389")
+	t.Setenv(BaseDNEnv, "dc=env,dc=com")
+	t.Setenv(BindDNEnv, "cn=admin,dc=env,dc=com")
+
+	cfg, err := Load(writeTemp(t, "config.yaml", "server: {}\nldap: {}\n"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Server.Listen != "127.0.0.1:9191" {
+		t.Errorf("listen = %q", cfg.Server.Listen)
+	}
+	if cfg.LDAP.BaseDN != "dc=env,dc=com" {
+		t.Errorf("base_dn = %q", cfg.LDAP.BaseDN)
+	}
+}
+
+func TestLoadEmptyEnvDoesNotOverride(t *testing.T) {
+	t.Setenv(ListenEnv, "")
+	t.Setenv(URLEnv, "")
+	t.Setenv(BaseDNEnv, "")
+	t.Setenv(BindDNEnv, "")
+
+	cfg, err := Load(writeTemp(t, "config.yaml", validMinimal))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Server.Listen != DefaultListen {
+		t.Errorf("listen = %q, want default", cfg.Server.Listen)
+	}
+	if cfg.LDAP.URL != "ldap://127.0.0.1:389" {
+		t.Errorf("url = %q, want YAML value", cfg.LDAP.URL)
+	}
+	if cfg.LDAP.BaseDN != "dc=example,dc=com" {
+		t.Errorf("base_dn = %q, want YAML value", cfg.LDAP.BaseDN)
+	}
+	if cfg.LDAP.BindDN != "cn=admin,dc=example,dc=com" {
+		t.Errorf("bind_dn = %q, want YAML value", cfg.LDAP.BindDN)
+	}
+}
+
+func TestLoadEnvValueValidated(t *testing.T) {
+	t.Setenv(URLEnv, "http://env.example.com:389")
+	t.Setenv(BaseDNEnv, "dc=env,dc=com")
+	t.Setenv(BindDNEnv, "cn=admin,dc=env,dc=com")
+
+	_, err := Load(writeTemp(t, "config.yaml", validMinimal))
+	if err == nil || !strings.Contains(err.Error(), "ldap.url") {
+		t.Fatalf("want env url validation error, got %v", err)
+	}
+}
+
 func TestLoadUnknownField(t *testing.T) {
 	path := writeTemp(t, "config.yaml", validMinimal+`
 unknown_key: true

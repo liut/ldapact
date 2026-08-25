@@ -68,6 +68,17 @@ log_level: "info"                    # debug|info|warn|error (LDAPADM_LOG_LEVEL 
 templates_dir: ""                    # optional custom XML template directory
 ```
 
+The four runtime profile fields can also be supplied or overridden by
+environment variables (env wins over YAML; an unset or empty variable is
+ignored):
+
+| config key     | env var             |
+|----------------|---------------------|
+| `server.listen` | `LDAPADM_LISTEN`    |
+| `ldap.url`     | `LDAPADM_URL`       |
+| `ldap.base_dn` | `LDAPADM_BASE_DN`   |
+| `ldap.bind_dn` | `LDAPADM_BIND_DN`   |
+
 **Secrets are never stored in the YAML.** The bind password (and the optional
 `auto_number` password) resolve through the chain:
 

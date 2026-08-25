@@ -10,6 +10,9 @@ unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
 - Strict YAML server profile (`pkg/config`) with R12 validation: TLS floor
   TLSv1.2, verify mandatory, StartTLS defaults on for `ldap://`, session
   timeout ranges, pool size, tree filter.
+- Environment variable overrides for the runtime profile fields:
+  `LDAPADM_LISTEN`, `LDAPADM_URL`, `LDAPADM_BASE_DN`, `LDAPADM_BIND_DN`
+  (non-empty env wins over YAML; empty env is ignored).
 - Secret resolver chain env → 0600 file → TTY prompt; plaintext YAML never
   accepted; truncated fingerprints for logs.
 - `log/slog` JSON logger with `userPassword`/`*_password` redaction at the
