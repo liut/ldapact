@@ -3,87 +3,37 @@ package ldapx
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"testing"
-	"time"
 
 	"github.com/go-ldap/ldap/v3"
-	"github.com/liut/ldapact/pkg/config"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
+	"github.com/liut/ldapact/internal/testldap"
 )
 
-// newOpenLDAPContainer starts a fresh OpenLDAP 2.6 container for the test.
-// The plan's Execution note requires testcontainers-go; when Docker is
-// unavailable the test skips (plan-sanctioned fallback to unit tests only).
-func newOpenLDAPContainer(t *testing.T, ctx context.Context) (string, func()) {
+// testInstance starts a throwaway LDAP backend (Docker container or local
+// ephemeral slapd) and skips when no backend is available.
+func testInstance(t *testing.T, ctx context.Context) *testldap.Instance {
 	t.Helper()
-	testcontainers.SkipIfProviderIsNotHealthy(t)
-
-	req := testcontainers.ContainerRequest{
-		Image:        "docker.io/bitnami/openldap:2.6",
-		ExposedPorts: []string{"1389/tcp"},
-		Env: map[string]string{
-			"LDAP_ADMIN_USERNAME": "admin",
-			"LDAP_ADMIN_PASSWORD": "admin_password",
-			"LDAP_ROOT":           "dc=example,dc=com",
-		},
-		WaitingFor: wait.ForListeningPort("1389/tcp").WithStartupTimeout(120 * time.Second),
+	inst, err := testldap.Start(ctx)
+	if errors.Is(err, testldap.ErrUnavailable) {
+		t.Skip("no LDAP backend available: " + err.Error())
 	}
-	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
-		Started:          true,
-	})
 	if err != nil {
-		t.Fatalf("start OpenLDAP container: %v", err)
+		t.Fatalf("start test LDAP: %v", err)
 	}
-	port, err := container.MappedPort(ctx, "1389/tcp")
-	if err != nil {
-		_ = testcontainers.TerminateContainer(container)
-		t.Fatalf("mapped port: %v", err)
-	}
-	addr := fmt.Sprintf("127.0.0.1:%d", port.Num())
-	return addr, func() { _ = testcontainers.TerminateContainer(container) }
-}
-
-// newIntegrationClient dials with a short retry loop so the container's
-// slapd has a moment to accept binds after the port is mapped.
-func newIntegrationClient(t *testing.T, addr string) *Client {
-	t.Helper()
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	cfg := &config.Config{}
-	cfg.LDAP.URL = "ldap://" + addr
-	cfg.LDAP.BaseDN = "dc=example,dc=com"
-	cfg.LDAP.BindDN = "cn=admin,dc=example,dc=com"
-	cfg.BindPassword = "admin_password"
-	cfg.LDAP.PoolSize = 2
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("config validate: %v", err)
-	}
-
-	var client *Client
-	var lastErr error
-	for i := 0; i < 10; i++ {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		client, lastErr = New(ctx, cfg, logger)
-		cancel()
-		if lastErr == nil {
-			return client
-		}
-		time.Sleep(2 * time.Second)
-	}
-	t.Fatalf("connect to OpenLDAP at %s: %v", addr, lastErr)
-	return nil
+	t.Cleanup(inst.Stop)
+	return inst
 }
 
 func TestIntegrationRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	addr, stop := newOpenLDAPContainer(t, ctx)
-	defer stop()
-
-	client := newIntegrationClient(t, addr)
+	inst := testInstance(t, ctx)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	client, err := New(ctx, inst.Config(), logger)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
 	defer client.Close()
 
 	// Subschema cache is populated at startup (R14).
@@ -154,22 +104,11 @@ func TestIntegrationRoundTrip(t *testing.T) {
 
 func TestIntegrationInvalidCredentials(t *testing.T) {
 	ctx := context.Background()
-	addr, stop := newOpenLDAPContainer(t, ctx)
-	defer stop()
-
+	inst := testInstance(t, ctx)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	cfg := &config.Config{}
-	cfg.LDAP.URL = "ldap://" + addr
-	cfg.LDAP.BaseDN = "dc=example,dc=com"
-	cfg.LDAP.BindDN = "cn=admin,dc=example,dc=com"
+	cfg := inst.Config()
 	cfg.BindPassword = "wrong-password"
-	cfg.LDAP.PoolSize = 1
-	if err := cfg.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	ctx2, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	_, err := New(ctx2, cfg, logger)
+	_, err := New(ctx, cfg, logger)
 	if err == nil {
 		t.Fatal("want bind failure with wrong password")
 	}

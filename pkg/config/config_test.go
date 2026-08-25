@@ -219,6 +219,13 @@ session:
 session:
   expired_action: "explode"
 `, "expired_action"},
+		{"password scheme invalid", `
+ldap:
+  url: "ldap://127.0.0.1:389"
+  base_dn: "dc=example,dc=com"
+  bind_dn: "cn=admin,dc=example,dc=com"
+  password_scheme: "ROT13"
+`, "password_scheme"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -231,6 +238,23 @@ session:
 				t.Fatalf("error %q does not mention %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestPasswordSchemeNormalized(t *testing.T) {
+	path := writeTemp(t, "config.yaml", `
+ldap:
+  url: "ldap://127.0.0.1:389"
+  base_dn: "dc=example,dc=com"
+  bind_dn: "cn=admin,dc=example,dc=com"
+  password_scheme: "ssha"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.LDAP.PasswordScheme != "SSHA" {
+		t.Errorf("password_scheme = %q, want SSHA", cfg.LDAP.PasswordScheme)
 	}
 }
 

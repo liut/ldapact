@@ -64,6 +64,10 @@ type LDAPConfig struct {
 	// PasswordPlainOverride permits {PLAIN} writes (KTD 6). Off by default;
 	// enabling it emits a structured warn on every plaintext write.
 	PasswordPlainOverride bool `yaml:"password_plain_override"`
+	// PasswordScheme is the RFC 2307 write scheme (default SSHA512 per KTD 6).
+	// Some directory builds only support legacy schemes ({SSHA} et al.); set
+	// this to one of the write-allowlist names to match the server.
+	PasswordScheme string `yaml:"password_scheme"`
 }
 
 // SessionConfig carries the cookie/session security settings (R13, KTD 8).
@@ -160,6 +164,14 @@ func (c *Config) validateLDAP() error {
 	}
 	if c.LDAP.PoolSize < 1 || c.LDAP.PoolSize > 100 {
 		return fmt.Errorf("ldap.pool_size must be 1..100, got %d", c.LDAP.PoolSize)
+	}
+	if s := strings.ToUpper(strings.TrimSpace(c.LDAP.PasswordScheme)); s != "" {
+		switch s {
+		case "SSHA512", "SSHA256", "SSHA384", "SSHA", "SHA512", "SHA256", "SHA384", "SHA", "ARGON2ID", "MD4":
+			c.LDAP.PasswordScheme = s
+		default:
+			return fmt.Errorf("ldap.password_scheme %q is not in the write allowlist", c.LDAP.PasswordScheme)
+		}
 	}
 
 	t := &c.LDAP.TLS

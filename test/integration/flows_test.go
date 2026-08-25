@@ -103,7 +103,7 @@ func TestFlowF2CreateAE3(t *testing.T) {
 	}
 
 	logs := envLogBuf.String()
-	if !strings.Contains(logs, `"event":"ldap.create"`) || !strings.Contains(logs, `"dn":"uid=smoke1,ou=People,dc=example,dc=com"`) {
+	if !strings.Contains(logs, `"event":"ldap.create"`) || !strings.Contains(logs, `"dn":"cn=smoke1,ou=People,dc=example,dc=com"`) {
 		t.Errorf("audit line missing (AE6): %.400s", logs)
 	}
 	if strings.Contains(logs, "Smoke#2026") {
@@ -162,13 +162,13 @@ cn: badimport
 // TestFlowF5F6: rename then delete the renamed entry.
 func TestFlowF5F6(t *testing.T) {
 	resp := do(t, http.MethodPost, "/api/entry/uid=u0002,ou=People,dc=example,dc=com/rename", url.Values{
-		"new_rdn": {"cn=u0002r"}, "delete_old_rdn": {"1"},
+		"new_rdn": {"uid=u0002r"}, "delete_old_rdn": {"1"},
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("rename = %d: %s", resp.StatusCode, body(t, resp))
 	}
-	resp = do(t, http.MethodPost, "/api/entry/cn=u0002r,ou=People,dc=example,dc=com/delete", url.Values{
-		"confirm_dn": {"cn=u0002r,ou=People,dc=example,dc=com"},
+	resp = do(t, http.MethodPost, "/api/entry/uid=u0002r,ou=People,dc=example,dc=com/delete", url.Values{
+		"confirm_dn": {"uid=u0002r,ou=People,dc=example,dc=com"},
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("delete = %d: %s", resp.StatusCode, body(t, resp))

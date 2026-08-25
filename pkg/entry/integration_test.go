@@ -2,7 +2,7 @@ package entry
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -11,64 +11,29 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/liut/ldapact/pkg/config"
+	"github.com/liut/ldapact/internal/testldap"
 	"github.com/liut/ldapact/pkg/ldapx"
 	"github.com/liut/ldapact/pkg/web"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 // TestIntegrationCreatePasswordRenameDelete exercises F2/F3/F5/F6 end to end
-// against a real OpenLDAP container (AE3 + AE4 gates). Skips without Docker.
+// against a throwaway LDAP backend (AE3 + AE4 gates). Skips when no backend
+// is available.
 func TestIntegrationCreatePasswordRenameDelete(t *testing.T) {
-	testcontainers.SkipIfProviderIsNotHealthy(t)
 	ctx := context.Background()
-
-	req := testcontainers.ContainerRequest{
-		Image:        "docker.io/bitnami/openldap:2.6",
-		ExposedPorts: []string{"1389/tcp"},
-		Env: map[string]string{
-			"LDAP_ADMIN_USERNAME": "admin",
-			"LDAP_ADMIN_PASSWORD": "admin_password",
-			"LDAP_ROOT":           "dc=example,dc=com",
-		},
-		WaitingFor: wait.ForListeningPort("1389/tcp").WithStartupTimeout(120 * time.Second),
+	inst, err := testldap.Start(ctx)
+	if errors.Is(err, testldap.ErrUnavailable) {
+		t.Skip("no LDAP backend available: " + err.Error())
 	}
-	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
-		Started:          true,
-	})
 	if err != nil {
-		t.Fatalf("start OpenLDAP: %v", err)
+		t.Fatalf("start test LDAP: %v", err)
 	}
-	defer func() { _ = testcontainers.TerminateContainer(container) }()
-	port, err := container.MappedPort(ctx, "1389/tcp")
-	if err != nil {
-		t.Fatal(err)
-	}
+	defer inst.Stop()
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	cfg := &config.Config{}
-	cfg.LDAP.URL = fmt.Sprintf("ldap://127.0.0.1:%d", port.Num())
-	cfg.LDAP.BaseDN = "dc=example,dc=com"
-	cfg.LDAP.BindDN = "cn=admin,dc=example,dc=com"
-	cfg.BindPassword = "admin_password"
-	cfg.LDAP.PoolSize = 2
-	if err := cfg.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	var client *ldapx.Client
-	for i := 0; i < 10; i++ {
-		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		client, err = ldapx.New(cctx, cfg, logger)
-		cancel()
-		if err == nil {
-			break
-		}
-		time.Sleep(2 * time.Second)
-	}
+	cfg := inst.Config()
+	client, err := ldapx.New(ctx, cfg, logger)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}

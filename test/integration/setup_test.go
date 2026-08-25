@@ -1,27 +1,26 @@
 // Package integration runs the end-to-end F1-F8 smoke test (U8) against a
-// testcontainers-go OpenLDAP instance. It exits cleanly (skip) when Docker is
-// unavailable, per the plan's CI fallback.
+// throwaway LDAP backend (Docker container or local ephemeral slapd, see
+// internal/testldap). It exits cleanly (skip) when no backend is available.
 package integration
 
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/liut/ldapact/internal/app"
+	"github.com/liut/ldapact/internal/testldap"
 	"github.com/liut/ldapact/pkg/config"
 	"github.com/liut/ldapact/pkg/ldapx"
 	"github.com/liut/ldapact/pkg/session"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 var (
@@ -32,75 +31,34 @@ var (
 	envLogBuf *bytes.Buffer
 	envLogger *slog.Logger
 	envServer *httptest.Server
+	envInst   *testldap.Instance
 )
 
 func TestMain(m *testing.M) {
-	if !dockerAvailable() {
-		fmt.Fprintln(os.Stderr, "integration: docker unavailable — skipping end-to-end tests")
+	ctx := context.Background()
+	inst, err := testldap.Start(ctx)
+	if errors.Is(err, testldap.ErrUnavailable) {
+		fmt.Fprintln(os.Stderr, "integration: no LDAP backend available — skipping end-to-end tests:", err)
 		os.Exit(0)
 	}
-	startEnv()
+	if err != nil {
+		panic(fmt.Sprintf("integration: start test LDAP: %v", err))
+	}
+	envInst = inst
+	startEnv(ctx)
 	code := m.Run()
 	stopEnv()
 	os.Exit(code)
 }
 
-func dockerAvailable() bool {
-	if _, err := exec.LookPath("docker"); err != nil {
-		return false
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "docker", "info")
-	return cmd.Run() == nil
-}
-
-func startEnv() {
-	envCtx, envCancel = context.WithCancel(context.Background())
-	req := testcontainers.ContainerRequest{
-		Image:        "docker.io/bitnami/openldap:2.6",
-		ExposedPorts: []string{"1389/tcp"},
-		Env: map[string]string{
-			"LDAP_ADMIN_USERNAME": "admin",
-			"LDAP_ADMIN_PASSWORD": "admin_password",
-			"LDAP_ROOT":           "dc=example,dc=com",
-		},
-		WaitingFor: wait.ForListeningPort("1389/tcp").WithStartupTimeout(120 * time.Second),
-	}
-	container, err := testcontainers.GenericContainer(envCtx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
-		Started:          true,
-	})
-	if err != nil {
-		panic(fmt.Sprintf("integration: start OpenLDAP: %v", err))
-	}
-	envContainer = container
-	port, err := container.MappedPort(envCtx, "1389/tcp")
-	if err != nil {
-		panic(err)
-	}
-	addr := fmt.Sprintf("127.0.0.1:%d", port.Num())
-
-	envCfg = &config.Config{}
-	envCfg.LDAP.URL = "ldap://" + addr
-	envCfg.LDAP.BaseDN = "dc=example,dc=com"
-	envCfg.LDAP.BindDN = "cn=admin,dc=example,dc=com"
-	envCfg.BindPassword = "admin_password"
+func startEnv(ctx context.Context) {
+	envCtx, envCancel = context.WithCancel(ctx)
+	envCfg = envInst.Config()
 	envCfg.LDAP.PoolSize = 4
-	if err := envCfg.Validate(); err != nil {
-		panic(err)
-	}
 	envLogBuf = &bytes.Buffer{}
 	envLogger = slog.New(slog.NewJSONHandler(envLogBuf, nil))
-	for i := 0; i < 10; i++ {
-		cctx, cancel := context.WithTimeout(envCtx, 10*time.Second)
-		envClient, err = ldapx.New(cctx, envCfg, envLogger)
-		cancel()
-		if err == nil {
-			break
-		}
-		time.Sleep(2 * time.Second)
-	}
+	var err error
+	envClient, err = ldapx.New(envCtx, envCfg, envLogger)
 	if err != nil {
 		panic(fmt.Sprintf("integration: connect: %v", err))
 	}
@@ -128,13 +86,11 @@ func stopEnv() {
 	if envCancel != nil {
 		envCancel()
 	}
-	if envContainer != nil {
-		_ = testcontainers.TerminateContainer(envContainer)
+	if envInst != nil {
+		envInst.Stop()
 	}
 	_ = os.Remove(filepath.Join(os.TempDir(), "ldapact-it-sessions.db"))
 }
-
-var envContainer testcontainers.Container
 
 // seed populates the test directory: 5 OUs, 1210 users (paged tree),
 // 3 groups (PickList candidates).

@@ -35,13 +35,14 @@ var ServerFuncsAllowlist = map[string]bool{
 
 // MacroContext carries the render-time state for server macros.
 type MacroContext struct {
-	Ctx          context.Context
-	Client       Searcher
-	AutoSearcher Searcher // independent auto-number pool (R8 rebind); nil falls back to Client
-	Logger       *slog.Logger
-	BaseDN       string
-	ParentDN     string // DN of the new entry's parent
-	Values       map[string]string
+	Ctx           context.Context
+	Client        Searcher
+	AutoSearcher  Searcher // independent auto-number pool (R8 rebind); nil falls back to Client
+	DefaultScheme string   // RFC 2307 write scheme when a macro omits it ("" -> DefaultHashScheme)
+	Logger        *slog.Logger
+	BaseDN        string
+	ParentDN      string // DN of the new entry's parent
+	Values        map[string]string
 	// PlainAllowed toggles the {PLAIN} write override (KTD 6).
 	PlainAllowed bool
 }
@@ -336,7 +337,10 @@ func macroPasswordEncrypt(ctx *MacroContext, args []string) (any, error) {
 		password = args[1]
 	}
 	if scheme == "" {
-		scheme = DefaultHashScheme
+		scheme = ctx.DefaultScheme
+		if scheme == "" {
+			scheme = DefaultHashScheme
+		}
 	}
 	if password == "" {
 		return "", nil

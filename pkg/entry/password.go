@@ -55,7 +55,7 @@ func (h *Handler) PasswordChange(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// KTD 6 default scheme (modification templates do not configure hashing).
-	hashed, err := tplengine.HashPasswordWithOverride(tplengine.DefaultHashScheme, newPW,
+	hashed, err := tplengine.HashPasswordWithOverride(h.passwordScheme(), newPW,
 		h.cfg != nil && h.cfg.LDAP.PasswordPlainOverride, h.logger)
 	if err != nil {
 		http.Error(w, "Internal Server Error: "+err.Error(), http.StatusInternalServerError)

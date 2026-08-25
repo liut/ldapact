@@ -2,6 +2,7 @@ package ldapx
 
 import (
 	"context"
+	"time"
 
 	"github.com/go-ldap/ldap/v3"
 )
@@ -50,9 +51,10 @@ func (c *Client) Search(ctx context.Context, req *ldap.SearchRequest) (*ldap.Sea
 
 // Page returns the Nth page (1-based) of a paged search (R2). The handler
 // stays stateless: each page request re-runs the search from the start with
-// the paging cookie carried forward, discarding earlier pages. Cancellation is
-// honored between pages and per request (the conn is dropped if the request
-// is still in flight when ctx is canceled).
+// the paging cookie carried forward, discarding earlier pages. The whole
+// multi-page loop runs on ONE pooled connection because LDAP paged-result
+// sessions are connection-scoped (sending a cookie on another connection
+// yields "paged results cookie is invalid").
 func (c *Client) Page(ctx context.Context, opts SearchOptions, page int) (*PageResult, error) {
 	if page < 1 {
 		page = 1
@@ -67,6 +69,37 @@ func (c *Client) Page(ctx context.Context, opts SearchOptions, page int) (*PageR
 		opts.BaseDN = c.baseDN
 	}
 
+	conn, err := c.pool.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for attempt := 1; ; attempt++ {
+		res, perr := pageLoop(ctx, conn, opts, page)
+		if perr == nil {
+			c.pool.Put(conn)
+			return res, nil
+		}
+		if attempt == 1 && isRetryable(perr) {
+			_ = c.pool.Put(conn) // validates and drops the sick conn
+			select {
+			case <-time.After(backoffFor(attempt)):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+			conn, err = c.pool.Get(ctx)
+			if err != nil {
+				return nil, err
+			}
+			continue
+		}
+		c.pool.Put(conn)
+		return nil, perr
+	}
+}
+
+// pageLoop walks pages 1..page on a single connection, carrying the paging
+// cookie forward.
+func pageLoop(ctx context.Context, conn Conn, opts SearchOptions, page int) (*PageResult, error) {
 	var cookie []byte
 	var entries []*ldap.Entry
 	for p := 1; p <= page; p++ {
@@ -76,9 +109,9 @@ func (c *Client) Page(ctx context.Context, opts SearchOptions, page int) (*PageR
 		req := ldap.NewSearchRequest(opts.BaseDN, opts.Scope, ldap.NeverDerefAliases,
 			opts.SizeLimit, opts.TimeLimit, false, opts.Filter, opts.Attrs,
 			[]ldap.Control{&ldap.ControlPaging{PagingSize: uint32(opts.PageSize), Cookie: cookie}})
-		res, err := c.Search(ctx, req)
+		res, err := conn.Search(req)
 		if err != nil {
-			return nil, err
+			return nil, wrapError("search", opts.BaseDN, err)
 		}
 		entries = res.Entries
 		cookie = pagingCookie(res.Controls)

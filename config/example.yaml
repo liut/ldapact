@@ -16,6 +16,9 @@ ldap:
   schema_compat: "openldap"
   tree_filter: "(objectClass=*)"
   pool_size: 8
+  # RFC 2307 write scheme; default SSHA512 (KTD 6). Downgrade to "SSHA" if the
+  # directory build lacks SHA-2 password support (bind verification fails).
+  password_scheme: "SSHA512"
 
 session:
   timeout_minutes: 30

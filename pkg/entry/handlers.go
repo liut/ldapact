@@ -57,13 +57,14 @@ func (a autoSearcher) Search(ctx context.Context, req *ldap.SearchRequest) (*lda
 // independent auto-number pool when one is configured (R8).
 func (h *Handler) macroContext(r *http.Request, values map[string]string) *tplengine.MacroContext {
 	mc := &tplengine.MacroContext{
-		Ctx:          r.Context(),
-		Client:       h.client,
-		Logger:       h.logger,
-		BaseDN:       h.client.BaseDN(),
-		ParentDN:     h.client.BaseDN(),
-		Values:       values,
-		PlainAllowed: h.cfg != nil && h.cfg.LDAP.PasswordPlainOverride,
+		Ctx:           r.Context(),
+		Client:        h.client,
+		Logger:        h.logger,
+		BaseDN:        h.client.BaseDN(),
+		ParentDN:      h.client.BaseDN(),
+		Values:        values,
+		PlainAllowed:  h.cfg != nil && h.cfg.LDAP.PasswordPlainOverride,
+		DefaultScheme: h.passwordScheme(),
 	}
 	if h.cfg != nil && h.cfg.LDAP.AutoNumberDN != "" {
 		if as, ok := h.client.(interface {
@@ -73,6 +74,14 @@ func (h *Handler) macroContext(r *http.Request, values map[string]string) *tplen
 		}
 	}
 	return mc
+}
+
+// passwordScheme returns the configured write scheme (KTD 6 default).
+func (h *Handler) passwordScheme() string {
+	if h.cfg != nil && h.cfg.LDAP.PasswordScheme != "" {
+		return h.cfg.LDAP.PasswordScheme
+	}
+	return tplengine.DefaultHashScheme
 }
 
 // ResultData drives the generic result page (success/error).

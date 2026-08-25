@@ -8,6 +8,7 @@ import (
 	"html"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/liut/ldapact"
 	"github.com/liut/ldapact/pkg/authn"
@@ -83,20 +84,23 @@ func NewHandler(d Deps) http.Handler {
 	})
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(ldapact.Assets())))
 	if treeBrowser != nil {
-		mux.HandleFunc("GET /api/tree/{dn...}/children", treeBrowser.Children)
+		// Go's ServeMux only allows multi-segment wildcards ({dn...}) as the
+		// final segment, so suffix actions are dispatched manually.
+		mux.HandleFunc("GET /api/tree/{dn...}", func(w http.ResponseWriter, r *http.Request) {
+			treeDispatch(treeBrowser, w, r)
+		})
 		mux.HandleFunc("GET /api/schema/objectclass", schemaBrowser.ObjectClasses)
 		mux.HandleFunc("GET /api/schema/objectclass/{name}", schemaBrowser.ObjectClassDetail)
 		mux.HandleFunc("GET /api/schema/attribute", schemaBrowser.Attributes)
 		mux.HandleFunc("GET /api/schema/attribute/{name}", schemaBrowser.AttributeDetail)
 		mux.HandleFunc("GET /api/template/{name}", entryHandler.CreateForm)
 		mux.HandleFunc("POST /api/template/{name}/create", entryHandler.CreateSubmit)
-		mux.HandleFunc("GET /api/entry/{dn...}", entryHandler.Detail)
-		mux.HandleFunc("GET /api/entry/{dn...}/password", entryHandler.PasswordForm)
-		mux.HandleFunc("POST /api/entry/{dn...}/password", entryHandler.PasswordChange)
-		mux.HandleFunc("GET /api/entry/{dn...}/delete", entryHandler.DeleteForm)
-		mux.HandleFunc("POST /api/entry/{dn...}/delete", entryHandler.DeleteSubmit)
-		mux.HandleFunc("GET /api/entry/{dn...}/rename", entryHandler.RenameForm)
-		mux.HandleFunc("POST /api/entry/{dn...}/rename", entryHandler.RenameSubmit)
+		mux.HandleFunc("GET /api/entry/{dn...}", func(w http.ResponseWriter, r *http.Request) {
+			entryDispatch(entryHandler, w, r)
+		})
+		mux.HandleFunc("POST /api/entry/{dn...}", func(w http.ResponseWriter, r *http.Request) {
+			entryDispatch(entryHandler, w, r)
+		})
 		mux.HandleFunc("GET /api/import", importHandler.Form)
 		mux.HandleFunc("POST /api/import", importHandler.Submit)
 		mux.HandleFunc("GET /api/import/report/{id}", importHandler.Report)
@@ -117,4 +121,54 @@ func NewHandler(d Deps) http.Handler {
 	h = logging.RequestID(h)
 	h = logging.Recover(d.Logger)(h)
 	return h
+}
+
+// treeDispatch strips the "/children" action suffix from
+// /api/tree/{dn...}/children (multi-segment wildcards must end the pattern).
+func treeDispatch(t *tree.Tree, w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/api/tree/")
+	dn := strings.TrimSuffix(rest, "/children")
+	if dn == rest || dn == "" {
+		http.NotFound(w, r)
+		return
+	}
+	r.SetPathValue("dn", dn)
+	t.Children(w, r)
+}
+
+// entryDispatch routes /api/entry/{dn...} and its /password /delete /rename
+// action suffixes by method (wildcards must end the pattern, so the action is
+// parsed from the last path segment). DNs containing "/" are not supported.
+func entryDispatch(h *entry.Handler, w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/api/entry/")
+	dn := rest
+	action := ""
+	if i := strings.LastIndexByte(rest, '/'); i >= 0 {
+		dn, action = rest[:i], rest[i+1:]
+	}
+	r.SetPathValue("dn", dn)
+	switch action {
+	case "password":
+		if r.Method == http.MethodPost {
+			h.PasswordChange(w, r)
+		} else {
+			h.PasswordForm(w, r)
+		}
+	case "delete":
+		if r.Method == http.MethodPost {
+			h.DeleteSubmit(w, r)
+		} else {
+			h.DeleteForm(w, r)
+		}
+	case "rename":
+		if r.Method == http.MethodPost {
+			h.RenameSubmit(w, r)
+		} else {
+			h.RenameForm(w, r)
+		}
+	case "":
+		h.Detail(w, r)
+	default:
+		http.NotFound(w, r)
+	}
 }

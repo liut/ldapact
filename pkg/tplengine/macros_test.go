@@ -52,6 +52,17 @@ func TestEvaluatePasswordMacros(t *testing.T) {
 	}
 }
 
+func TestEvaluatePasswordMacrosDefaultSchemeOverride(t *testing.T) {
+	ctx := &MacroContext{DefaultScheme: "SSHA"}
+	res, err := Evaluate(ctx, "=php.PasswordEncrypt(;secret)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(res.(string), "{SSHA}") {
+		t.Errorf("override scheme = %q", res)
+	}
+}
+
 func TestEvaluateHashAndRandom(t *testing.T) {
 	ctx := &MacroContext{}
 	h, err := Evaluate(ctx, "=php.HashPassword(SSHA256;pw)")
