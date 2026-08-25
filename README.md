@@ -58,6 +58,7 @@ ldap:
   tree_filter: "(objectClass=*)"
   pool_size: 8
   password_plain_override: false     # {PLAIN} writes emit a warn when enabled
+  password_scheme: "SSHA512"         # RFC 2307 write scheme (SSHA for legacy dirs)
 session:
   timeout_minutes: 30                # idle, 5..240
   absolute_timeout_minutes: 480      # absolute, 30..1440
@@ -110,14 +111,37 @@ v1 pre-launch checklist.
 
 ```sh
 make build            # CGO_ENABLED=0 single binary -> bin/ldapact
-make test             # unit tests (no Docker required)
+make test             # unit tests + integration tests (backend auto-detected)
 make test-js          # JS unit tests (Node)
-make test-integration # end-to-end F1-F8 vs testcontainers-go OpenLDAP (Docker)
+make test-integration # end-to-end F1-F8 vs the detected backend
 make lint             # gofmt + go vet + staticcheck + govulncheck
 make run              # local dev with config/example.yaml
 ```
 
-Integration tests skip automatically when Docker is unavailable.
+### Integration-test LDAP backends
+
+Integration tests use `internal/testldap`, which detects a backend in this
+order and never touches a real LDAP service:
+
+1. `LDAPADM_TEST_LDAP_URL` — use a caller-provisioned dedicated test server
+   (optionally `LDAPADM_TEST_LDAP_BIND_DN/_BIND_PASSWORD/_BASE_DN`).
+2. Docker — an ephemeral `bitnami/openldap:2.6` container (testcontainers-go).
+3. A local `slapd` binary — an **ephemeral foreground instance** with a
+   generated config and temp data directory on a random `127.0.0.1` port
+   (MacPorts `/opt/local/libexec/slapd`, Homebrew, or system OpenLDAP).
+   System configs, data directories, pidfiles, and launchd/systemd services
+   are never read or modified.
+
+When no backend exists, integration tests skip. The harness probes whether the
+server verifies `{SSHA512}` binds and downgrades the write scheme to `{SSHA}`
+for directory builds that lack SHA-2 password support (e.g. the MacPorts
+OpenLDAP build); the product default remains SSHA512 (KTD 6).
+
+The local-backend runs also caught and fixed two latent defects: `{dn...}`
+wildcards can't be followed by literal segments in Go's ServeMux (route
+dispatch now parses `/children`, `/password`, `/delete`, `/rename` suffixes),
+and LDAP paged-result sessions are connection-scoped, so `Page` now pins one
+pooled connection for the whole multi-page loop.
 
 ## API surface
 

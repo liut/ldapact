@@ -179,3 +179,23 @@ unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
 - Accepted residuals recorded in
   `docs/residual-review-findings/feat-ldapact-v1.md` (F2 single-page wizard,
   O(n²) subtree export, pre-handler session rotation).
+
+## Non-containerized integration tests (internal/testldap)
+
+- New `internal/testldap` backend detection: `LDAPADM_TEST_LDAP_URL` →
+  Docker (testcontainers) → local ephemeral `slapd` → skip. The local backend
+  generates an isolated `slapd.conf` + temp data dir, binds a random loopback
+  port, runs slapd in the foreground as the current user, seeds the base
+  entry, and tears everything down on Stop — never touching system configs,
+  data dirs, pidfiles, or launchd/systemd services (safety contract).
+- All four package integration suites + the F1-F8 harness now use the shared
+  backend; the harness runs for real against the local MacPorts OpenLDAP on
+  this machine (12s).
+- Fixed two latent defects the local runs exposed: Go ServeMux rejects
+  `{dn...}` followed by literals (route registration would panic at startup),
+  and LDAP paged-result sessions are connection-scoped (Page now pins one
+  connection for the whole multi-page loop).
+- New `password_scheme` config option (KTD 6 default SSHA512); the harness
+  probes `{SSHA512}` bind support and downgrades to `{SSHA}` for builds that
+  lack SHA-2 password schemes (verified: MacPorts OpenLDAP 2.6.13 rejects
+  SSHA512).
