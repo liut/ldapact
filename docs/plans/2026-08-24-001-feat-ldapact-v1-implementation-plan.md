@@ -1,7 +1,7 @@
 ---
 title: ldapact v1 — Go reimplementation of phpLDAPadmin
 type: feat
-status: active
+status: completed
 date: 2026-08-24
 origin: docs/brainstorms/ldapact-go-reimplementation.md
 ---

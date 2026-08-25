@@ -163,3 +163,19 @@ unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
 - README (install/config/deployment/security/API surface) and OPERATIONS
   (secret resolver examples, sessions.db lifecycle, log shipping, TLS
   rotation, cutover playbook, error-code mapping, v1 pre-launch checklist).
+
+## v1 review pass (Tier 2, ce-code-review 20260825-153915)
+
+- LDIF parser: bounded line reads (R11 constant-memory guarantee).
+- LDIF import: oversized bodies return 413; export: entry lookup before
+  response headers (clean 404/5xx).
+- Entry detail: `userPassword` values redacted in the UI (scheme shown).
+- Create/password errors mapped via LDAP result codes (no brittle string
+  matching).
+- `GetNextNumber` runs on the independent auto-number pool when configured
+  (R8 rebind).
+- F8 global scope searches from the root DSE; `page_size` honored.
+- Rename success links to the new DN.
+- Accepted residuals recorded in
+  `docs/residual-review-findings/feat-ldapact-v1.md` (F2 single-page wizard,
+  O(n²) subtree export, pre-handler session rotation).
