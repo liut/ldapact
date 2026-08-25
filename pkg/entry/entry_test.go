@@ -244,6 +244,12 @@ func TestDetail(t *testing.T) {
 			t.Errorf("detail missing %q", want)
 		}
 	}
+	if strings.Contains(body, "hash") {
+		t.Error("detail must not echo the userPassword value")
+	}
+	if !strings.Contains(body, "[redacted]") {
+		t.Error("detail should show [redacted] for userPassword")
+	}
 }
 
 func TestDetailNotFound(t *testing.T) {
@@ -415,6 +421,9 @@ func TestRenameSuccess(t *testing.T) {
 	}
 	if rr.Code != http.StatusOK {
 		t.Fatalf("code = %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "cn=robert,ou=People,dc=example,dc=com") {
+		t.Errorf("result must reference the new DN: %s", rr.Body.String())
 	}
 }
 

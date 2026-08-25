@@ -91,6 +91,17 @@ func TestExportInvalidScope(t *testing.T) {
 	}
 }
 
+func TestExportEntryNotFound(t *testing.T) {
+	client := &fakeExporter{entries: []*ldap.Entry{}}
+	h := NewExportHandler(client, nil)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/export?dn=cn=missing,dc=x&scope=entry", nil)
+	h.Export(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("code = %d, want 404", rr.Code)
+	}
+}
+
 func TestExportBinaryAttribute(t *testing.T) {
 	client := &fakeExporter{entries: []*ldap.Entry{{
 		DN: "cn=alice,dc=example,dc=com",

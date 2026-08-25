@@ -74,7 +74,7 @@ func (it *Iterator) Next() (*Entry, *EntryError, error) {
 		return nil, nil, io.EOF
 	}
 	for {
-		line, err := readLine(it.r)
+		line, err := readLine(it.r, it.opts.MaxValueBytes+4096)
 		if err != nil && !errors.Is(err, io.EOF) {
 			return nil, nil, err
 		}
@@ -274,11 +274,14 @@ func validAttrName(name string) bool {
 	return true
 }
 
-func readLine(r *bufio.Reader) (string, error) {
+func readLine(r *bufio.Reader, maxBytes int64) (string, error) {
 	var sb strings.Builder
 	for {
 		chunk, err := r.ReadString('\n')
 		sb.WriteString(chunk)
+		if int64(sb.Len()) > maxBytes {
+			return "", fmt.Errorf("line exceeds maximum length (%d bytes)", maxBytes)
+		}
 		if err != nil {
 			if errors.Is(err, io.EOF) && sb.Len() > 0 {
 				return sb.String(), io.EOF

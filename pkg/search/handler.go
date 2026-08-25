@@ -68,6 +68,10 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 	if page < 1 {
 		page = 1
 	}
+	pageSize, _ := strconv.Atoi(r.URL.Query().Get("page_size"))
+	if pageSize < 1 || pageSize > 500 {
+		pageSize = DefaultPageSize
+	}
 	data := Data{Query: q, Scope: scope, Base: base, Page: page}
 	if q == "" {
 		data.Error = "Enter a search filter."
@@ -84,11 +88,12 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 		base = ""
 	}
 	res, err := h.client.Page(r.Context(), ldapx.SearchOptions{
-		BaseDN:   base,
-		Scope:    scopeInt,
-		Filter:   q,
-		Attrs:    []string{"objectClass", "modifyTimestamp"},
-		PageSize: h.pageSize,
+		BaseDN:         base,
+		Scope:          scopeInt,
+		Filter:         q,
+		Attrs:          []string{"objectClass", "modifyTimestamp"},
+		PageSize:       pageSize,
+		AllowEmptyBase: scope == "global",
 	}, page)
 	if err != nil {
 		data.Error = "Search failed: " + err.Error()

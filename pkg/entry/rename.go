@@ -83,10 +83,14 @@ func (h *Handler) RenameSubmit(w http.ResponseWriter, r *http.Request) {
 		parent = h.client.BaseDN()
 	}
 	w.Header().Set("X-Mutated-Subtree", parent)
+	newDN := newRDN
+	if targetParent != "" {
+		newDN = newRDN + "," + targetParent
+	}
 	h.renderPage(w, "Entry renamed — ldapact", "result-page", ResultData{
 		Title:    "Entry renamed",
-		Message:  fmt.Sprintf("Renamed to %s", dn),
-		Link:     "/api/entry/" + url.PathEscape(dn),
+		Message:  fmt.Sprintf("Renamed to %s", newDN),
+		Link:     "/api/entry/" + url.PathEscape(newDN),
 		LinkText: "View entry",
 	})
 }

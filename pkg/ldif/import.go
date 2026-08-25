@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -119,6 +120,11 @@ func (h *ImportHandler) Submit(w http.ResponseWriter, r *http.Request) {
 		}
 		if err != nil {
 			result.Error = "Import aborted: " + err.Error()
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				http.Error(w, "Payload Too Large: LDIF body exceeds 100MB", http.StatusRequestEntityTooLarge)
+				return
+			}
 			break
 		}
 		if perr != nil {

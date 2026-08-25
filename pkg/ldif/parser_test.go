@@ -150,6 +150,16 @@ func TestParseEntryCap(t *testing.T) {
 	}
 }
 
+func TestParseOversizedLine(t *testing.T) {
+	opts := DefaultOptions()
+	opts.MaxValueBytes = 64
+	src := "dn: cn=x,dc=y\ndescription: " + strings.Repeat("x", 5000) + "\n"
+	_, _, err := collect(t, src, opts)
+	if err == nil || !strings.Contains(err.Error(), "line exceeds maximum length") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestParseBinaryMultiValued(t *testing.T) {
 	src := "dn: cn=x,dc=y\nuserCertificate;binary:: dGVzdA==\nuserCertificate;binary:: bW9yZQ==\n"
 	entries, errs, err := collect(t, src, DefaultOptions())

@@ -38,9 +38,10 @@ func ParseAutoFill(raw string) (*AutoFill, error) {
 	a := &AutoFill{Target: target, Template: tpl}
 	seen := map[string]bool{}
 	for _, m := range tokenRE.FindAllStringSubmatch(tpl, -1) {
-		name := strings.ToLower(m[1])
-		if !seen[name] {
-			seen[name] = true
+		name := m[1]
+		key := strings.ToLower(name)
+		if !seen[key] {
+			seen[key] = true
 			a.Sources = append(a.Sources, name)
 		}
 	}

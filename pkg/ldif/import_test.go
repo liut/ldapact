@@ -141,6 +141,17 @@ func TestImportMissingFilePart(t *testing.T) {
 	}
 }
 
+func TestImportOversizedBody413(t *testing.T) {
+	h := importHandler(t, &fakeAdder{})
+	h.maxBody = 1024
+	big := strings.Repeat("x", 4096)
+	mpBody, ct := multipartBody(t, "dn: cn=x,dc=y\ncn: "+big+"\n", false)
+	rr := postImport(t, h, mpBody, ct)
+	if rr.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("code = %d, want 413", rr.Code)
+	}
+}
+
 func TestImportReportRoundTrip(t *testing.T) {
 	store := NewReportStore()
 	store.Save("id-1", "report content")

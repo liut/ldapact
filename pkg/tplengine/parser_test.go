@@ -153,10 +153,10 @@ func TestParseAutoFill(t *testing.T) {
 	if a.Target != "cn" || a.Template != "%givenName|0-2/l% %sn%" {
 		t.Errorf("autofill = %+v", a)
 	}
-	if len(a.Sources) != 2 || a.Sources[0] != "givenname" || a.Sources[1] != "sn" {
+	if len(a.Sources) != 2 || a.Sources[0] != "givenName" || a.Sources[1] != "sn" {
 		t.Errorf("sources = %v", a.Sources)
 	}
-	if !strings.Contains(a.Emit(), `sources:["givenname","sn"]`) {
+	if !strings.Contains(a.Emit(), `sources:["givenName","sn"]`) {
 		t.Errorf("emit = %s", a.Emit())
 	}
 }

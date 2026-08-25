@@ -2,6 +2,7 @@ package entry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -118,6 +119,15 @@ func verifyUserBind(ctx context.Context, cfg *config.Config, dn, password string
 }
 
 func passwordChangeError(err error) string {
+	var lerr *ldapx.LDAPError
+	if errors.As(err, &lerr) {
+		switch lerr.Code {
+		case ldap.LDAPResultConstraintViolation:
+			return "The directory rejected the password (constraint violation)."
+		case ldap.LDAPResultUnwillingToPerform:
+			return "The directory rejected the password (policy violation)."
+		}
+	}
 	msg := err.Error()
 	switch {
 	case strings.Contains(msg, "53"), strings.Contains(msg, "constraint"), strings.Contains(msg, "quality"):

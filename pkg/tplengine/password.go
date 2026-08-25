@@ -19,6 +19,7 @@ import (
 	_ "github.com/GehirnInc/crypt/sha512_crypt"
 	"github.com/alexedwards/argon2id"
 	"golang.org/x/crypto/bcrypt"
+	//lint:ignore SA1019 MD4 required for AD userPassword compatibility (KTD 6)
 	"golang.org/x/crypto/md4"
 )
 
@@ -73,7 +74,6 @@ func HashPassword(scheme, password string) (string, error) {
 		for _, r := range u {
 			b = append(b, byte(r), byte(r>>8))
 		}
-		//lint:ignore SA1019 MD4 required for AD userPassword compatibility (KTD 6)
 		h := md4.New()
 		h.Write(b)
 		return "{MD4}" + base64.StdEncoding.EncodeToString(h.Sum(nil)), nil
@@ -202,7 +202,6 @@ func VerifyPassword(hashed, password string) bool {
 		for _, r := range u {
 			b = append(b, byte(r), byte(r>>8))
 		}
-		//lint:ignore SA1019 MD4 required for AD userPassword compatibility (KTD 6)
 		h := md4.New()
 		h.Write(b)
 		return constantEq(h.Sum(nil), payload)

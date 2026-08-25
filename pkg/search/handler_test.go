@@ -13,11 +13,13 @@ import (
 )
 
 type fakeSearcher struct {
-	res *ldapx.PageResult
-	err error
+	res     *ldapx.PageResult
+	err     error
+	gotOpts ldapx.SearchOptions
 }
 
-func (f *fakeSearcher) Page(_ context.Context, _ ldapx.SearchOptions, _ int) (*ldapx.PageResult, error) {
+func (f *fakeSearcher) Page(_ context.Context, opts ldapx.SearchOptions, _ int) (*ldapx.PageResult, error) {
+	f.gotOpts = opts
 	return f.res, f.err
 }
 func (f *fakeSearcher) BaseDN() string { return "dc=example,dc=com" }
@@ -109,5 +111,27 @@ func TestFilterErrorPositions(t *testing.T) {
 	}
 	if got := filterError("uid=x)", nil); !strings.Contains(got, "position 5") {
 		t.Errorf("extra close: %q", got)
+	}
+}
+
+func TestSearchGlobalUsesRootBase(t *testing.T) {
+	fake := &fakeSearcher{res: &ldapx.PageResult{Entries: []*ldap.Entry{}, HasMore: false, Page: 1}}
+	h := searchHandler(t, fake)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/search?q=(uid=alice)&scope=global", nil)
+	h.Search(rr, req)
+	if fake.gotOpts.BaseDN != "" || !fake.gotOpts.AllowEmptyBase {
+		t.Errorf("global scope opts = %+v", fake.gotOpts)
+	}
+}
+
+func TestSearchPageSize(t *testing.T) {
+	fake := &fakeSearcher{res: &ldapx.PageResult{Entries: []*ldap.Entry{}, HasMore: false, Page: 1}}
+	h := searchHandler(t, fake)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/search?q=(uid=x)&page_size=25", nil)
+	h.Search(rr, req)
+	if fake.gotOpts.PageSize != 25 {
+		t.Errorf("page_size = %d", fake.gotOpts.PageSize)
 	}
 }

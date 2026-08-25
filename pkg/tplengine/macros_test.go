@@ -187,6 +187,23 @@ func TestGetNextNumberErrors(t *testing.T) {
 	}
 }
 
+func TestGetNextNumberUsesAutoSearcher(t *testing.T) {
+	admin := &fakeSearcher{entries: []*ldap.Entry{
+		{DN: "uid=1,ou=People,dc=x", Attributes: []*ldap.EntryAttribute{{Name: "uidNumber", Values: []string{"1001"}}}},
+	}}
+	auto := &fakeSearcher{entries: []*ldap.Entry{
+		{DN: "uid=a,ou=People,dc=x", Attributes: []*ldap.EntryAttribute{{Name: "uidNumber", Values: []string{"5001"}}}},
+	}}
+	ctx := &MacroContext{Client: admin, AutoSearcher: auto, BaseDN: "dc=x"}
+	res, err := Evaluate(ctx, "=php.GetNextNumber(/;uidNumber)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ev := res.(*Evaluated); ev.Text != "5002" {
+		t.Errorf("auto pool next = %+v, want 5002", ev)
+	}
+}
+
 func TestPickListErrors(t *testing.T) {
 	if _, err := Evaluate(&MacroContext{}, "=php.PickList(/)"); err == nil {
 		t.Error("want missing args error")

@@ -41,6 +41,40 @@ type Handler struct {
 	cfg      *config.Config
 }
 
+// autoSearcher adapts an LDAP client's independent auto-number pool
+// (ldapx.Client.SearchAuto) to the macro Searcher interface (R8 rebind).
+type autoSearcher struct {
+	client interface {
+		SearchAuto(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error)
+	}
+}
+
+func (a autoSearcher) Search(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+	return a.client.SearchAuto(ctx, req)
+}
+
+// macroContext builds a render-time macro context; GetNextNumber uses the
+// independent auto-number pool when one is configured (R8).
+func (h *Handler) macroContext(r *http.Request, values map[string]string) *tplengine.MacroContext {
+	mc := &tplengine.MacroContext{
+		Ctx:          r.Context(),
+		Client:       h.client,
+		Logger:       h.logger,
+		BaseDN:       h.client.BaseDN(),
+		ParentDN:     h.client.BaseDN(),
+		Values:       values,
+		PlainAllowed: h.cfg != nil && h.cfg.LDAP.PasswordPlainOverride,
+	}
+	if h.cfg != nil && h.cfg.LDAP.AutoNumberDN != "" {
+		if as, ok := h.client.(interface {
+			SearchAuto(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error)
+		}); ok {
+			mc.AutoSearcher = autoSearcher{client: as}
+		}
+	}
+	return mc
+}
+
 // ResultData drives the generic result page (success/error).
 type ResultData struct {
 	Title    string

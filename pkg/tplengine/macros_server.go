@@ -35,12 +35,13 @@ var ServerFuncsAllowlist = map[string]bool{
 
 // MacroContext carries the render-time state for server macros.
 type MacroContext struct {
-	Ctx      context.Context
-	Client   Searcher
-	Logger   *slog.Logger
-	BaseDN   string
-	ParentDN string // DN of the new entry's parent
-	Values   map[string]string
+	Ctx          context.Context
+	Client       Searcher
+	AutoSearcher Searcher // independent auto-number pool (R8 rebind); nil falls back to Client
+	Logger       *slog.Logger
+	BaseDN       string
+	ParentDN     string // DN of the new entry's parent
+	Values       map[string]string
 	// PlainAllowed toggles the {PLAIN} write override (KTD 6).
 	PlainAllowed bool
 }
@@ -264,9 +265,13 @@ func macroGetNextNumber(ctx *MacroContext, args []string) (any, error) {
 		}
 	}
 
+	client := ctx.Client
+	if ctx.AutoSearcher != nil {
+		client = ctx.AutoSearcher
+	}
 	req := ldap.NewSearchRequest(base, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases,
 		0, 0, false, filter, []string{attr}, nil)
-	res, err := ctx.Client.Search(macroCtx(ctx), req)
+	res, err := client.Search(macroCtx(ctx), req)
 	if err != nil {
 		return nil, fmt.Errorf("GetNextNumber search: %w", err)
 	}

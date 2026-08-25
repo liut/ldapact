@@ -50,12 +50,9 @@ func (h *ExportHandler) Export(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("LDIF export includes secrets", "event", "ldif.export_secrets", "dn", dn)
 	}
 
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="ldapact-export-%s.ldif"`, time.Now().Format("20060102-150405")))
-	wr := NewWriter(w)
-	if _, err := wr.w.WriteString("version: 1\n"); err != nil {
-		return
-	}
+	// Entry scope: resolve the entry before committing response headers so a
+	// failed lookup returns a clean error status instead of a mangled LDIF.
+	var single *ldap.Entry
 	if scope == "entry" {
 		req := ldap.NewSearchRequest(dn, ldap.ScopeBaseObject, ldap.NeverDerefAliases,
 			0, 0, false, "(objectClass=*)", []string{"*"}, nil)
@@ -68,7 +65,17 @@ func (h *ExportHandler) Export(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Entry not found", http.StatusNotFound)
 			return
 		}
-		if err := wr.WriteEntry(entryToLDIF(res.Entries[0], includeSecrets)); err != nil {
+		single = res.Entries[0]
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="ldapact-export-%s.ldif"`, time.Now().Format("20060102-150405")))
+	wr := NewWriter(w)
+	if _, err := wr.w.WriteString("version: 1\n"); err != nil {
+		return
+	}
+	if scope == "entry" {
+		if err := wr.WriteEntry(entryToLDIF(single, includeSecrets)); err != nil {
 			return
 		}
 		return

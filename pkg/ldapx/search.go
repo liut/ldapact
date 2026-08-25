@@ -18,6 +18,9 @@ type SearchOptions struct {
 	PageSize  int
 	SizeLimit int
 	TimeLimit int
+	// AllowEmptyBase permits an explicit empty BaseDN (root DSE, F8 "global"
+	// scope) instead of defaulting to the configured base DN.
+	AllowEmptyBase bool
 }
 
 // PageResult is one page of a paged search.
@@ -60,7 +63,7 @@ func (c *Client) Page(ctx context.Context, opts SearchOptions, page int) (*PageR
 	if opts.Filter == "" {
 		opts.Filter = "(objectClass=*)"
 	}
-	if opts.BaseDN == "" {
+	if opts.BaseDN == "" && !opts.AllowEmptyBase {
 		opts.BaseDN = c.baseDN
 	}
 

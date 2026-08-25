@@ -59,10 +59,14 @@ func (h *Handler) Detail(w http.ResponseWriter, r *http.Request) {
 		if strings.EqualFold(a.Name, "objectClass") {
 			continue
 		}
-		data.Attributes = append(data.Attributes, DetailAttr{Name: a.Name, Values: a.Values})
 		if strings.EqualFold(a.Name, "userPassword") && len(a.Values) > 0 {
+			// The hash itself is directory data, but the UI follows
+			// phpLDAPadmin's convention of not echoing password values.
+			data.Attributes = append(data.Attributes, DetailAttr{Name: a.Name, Values: []string{"[redacted]"}})
 			data.PasswordScheme = tplengine.DetectScheme(a.Values[0])
+			continue
 		}
+		data.Attributes = append(data.Attributes, DetailAttr{Name: a.Name, Values: a.Values})
 	}
 	h.renderPage(w, e.DN+" — ldapact", "entry-detail-content", data)
 }

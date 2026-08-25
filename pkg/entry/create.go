@@ -1,12 +1,14 @@
 package entry
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
 
+	"github.com/liut/ldapact/pkg/ldapx"
 	"github.com/liut/ldapact/pkg/tplengine"
 )
 
@@ -55,15 +57,8 @@ func (h *Handler) CreateForm(w http.ResponseWriter, r *http.Request) {
 	if container == "" {
 		container = h.client.BaseDN()
 	}
-	mc := &tplengine.MacroContext{
-		Ctx:          r.Context(),
-		Client:       h.client,
-		Logger:       h.logger,
-		BaseDN:       h.client.BaseDN(),
-		ParentDN:     container,
-		Values:       map[string]string{},
-		PlainAllowed: h.cfg != nil && h.cfg.LDAP.PasswordPlainOverride,
-	}
+	mc := h.macroContext(r, map[string]string{})
+	mc.ParentDN = container
 	if err := tmpl.EvaluateMacros(mc); err != nil {
 		h.logger.Error("template macro evaluation failed", "event", "tpl.macro_failed", "template", name, "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -121,15 +116,8 @@ func (h *Handler) CreateSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Apply post hooks (e.g. PasswordEncrypt) after %var% substitution.
-	mc := &tplengine.MacroContext{
-		Ctx:          r.Context(),
-		Client:       h.client,
-		Logger:       h.logger,
-		BaseDN:       h.client.BaseDN(),
-		ParentDN:     container,
-		Values:       values,
-		PlainAllowed: h.cfg != nil && h.cfg.LDAP.PasswordPlainOverride,
-	}
+	mc := h.macroContext(r, values)
+	mc.ParentDN = container
 	for _, a := range tmpl.Attributes {
 		for _, hook := range a.PostHooks {
 			substituted := substituteValues(hook, values)
@@ -215,14 +203,8 @@ func buildFormFields(tmpl *tplengine.Template) []FormField {
 }
 
 func (h *Handler) renderCreateErrors(w http.ResponseWriter, r *http.Request, tmpl *tplengine.Template, container string, values map[string]string, errs map[string]string) {
-	mc := &tplengine.MacroContext{
-		Ctx:      r.Context(),
-		Client:   h.client,
-		Logger:   h.logger,
-		BaseDN:   h.client.BaseDN(),
-		ParentDN: container,
-		Values:   values,
-	}
+	mc := h.macroContext(r, values)
+	mc.ParentDN = container
 	_ = tmpl.EvaluateMacros(mc)
 	data := CreateFormData{
 		TemplateName:  tmpl.Name,
@@ -276,12 +258,18 @@ func buildDN(container, rdnAttr, rdnValue string) string {
 }
 
 func friendlyCreateError(err error) string {
+	var lerr *ldapx.LDAPError
+	if errors.As(err, &lerr) {
+		switch lerr.Code {
+		case 68:
+			return "Entry already exists — choose a different RDN."
+		case 65, 19, 20:
+			return "The directory rejected the entry (schema violation). Check required attributes."
+		}
+	}
 	msg := err.Error()
 	switch {
-	case strings.Contains(msg, "68"):
-		return "Entry already exists — choose a different RDN."
-	case strings.Contains(msg, "65"), strings.Contains(msg, "19"), strings.Contains(msg, "20"),
-		strings.Contains(msg, "objectclass"),
+	case strings.Contains(msg, "objectclass"),
 		strings.Contains(msg, "Object Class"), strings.Contains(msg, "schema"):
 		return "The directory rejected the entry (schema violation). Check required attributes."
 	default:
