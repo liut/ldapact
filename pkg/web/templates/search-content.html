@@ -1,0 +1,42 @@
+{{define "search-content"}}
+<section aria-labelledby="search-title">
+  <h1 id="search-title">Search</h1>
+  <form method="get" action="/api/search" class="search-form">
+    <div class="form-field">
+      <label for="q">Filter</label>
+      <input type="text" id="q" name="q" value="{{.Query}}" placeholder="(uid=alice)" required
+             {{if .Error}}aria-invalid="true" aria-describedby="search-error"{{end}}>
+    </div>
+    <div class="form-field">
+      <label for="scope">Scope</label>
+      <select id="scope" name="scope">
+        <option value="subtree" {{if eq .Scope "subtree"}}selected{{end}}>Subtree (from base)</option>
+        <option value="global" {{if eq .Scope "global"}}selected{{end}}>Global (whole directory)</option>
+      </select>
+    </div>
+    <input type="hidden" name="base" value="{{.Base}}">
+    <div class="form-actions">
+      <button type="submit" class="primary">Search</button>
+    </div>
+  </form>
+  {{if .Error}}<div class="error-box" role="alert" id="search-error">{{.Error}}</div>{{end}}
+  {{if .Rows}}
+  <p role="status">{{.Total}} results on this page{{if .HasMore}} — more available{{end}}</p>
+  <table>
+    <thead><tr><th scope="col">DN</th><th scope="col">Object classes</th><th scope="col">Last modified</th></tr></thead>
+    <tbody>
+      {{range .Rows}}
+      <tr>
+        <td><a href="/api/entry/{{.DN | urlquery}}">{{.DN}}</a></td>
+        <td>{{.ObjectClasses}}</td>
+        <td>{{.Modified}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{if .HasMore}}<p><a href="/api/search?q={{.Query | urlquery}}&amp;scope={{.Scope}}&amp;base={{.Base | urlquery}}&amp;page={{add .Page 1}}">Next page</a></p>{{end}}
+  {{else if and .Query (not .Error)}}
+  <p role="status">0 results</p>
+  {{end}}
+</section>
+{{end}}

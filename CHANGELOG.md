@@ -124,3 +124,24 @@ unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
   password values never logged).
 - Integration test (testcontainers-go OpenLDAP, Docker-gated) exercising
   F2→bind→F3→F6→F5 against a live directory (AE3/AE4).
+
+## U7 — LDIF import/export (F4/F7) + search (F8)
+
+- `pkg/ldif`: streaming RFC 2849 parser (bounded memory, no ReadAll) with
+  R11 caps (100k entries, 1000 attrs/entry, 10MiB values), strict validation
+  (dn required, UTF-8 values, URL references rejected, base64/continuation
+  support), per-record error continuation (AE5); RFC 2849 writer with
+  automatic base64 for binary/unsafe values and long-line folding.
+- F4 import: multipart upload capped at 100MB (413 without disk buffering),
+  per-entry try/continue, dry-run mode, result page with success/failure
+  counts + inline rows (line/reason/raw LDIF), and a downloadable
+  `import-errors-<timestamp>.txt` report served from an in-memory store.
+- F7 export: entry or subtree scope; subtree streams page-by-page via the
+  paging cookie with `http.Flusher`; `userPassword` redacted by default,
+  `include_secrets=1` emits a warn; binary attributes base64.
+- F8 search: `GET /api/search` with LDAP filter validation (inline
+  "filter syntax error at position N" + `aria-invalid`), subtree/global scope,
+  DN-sorted results (objectClass + modifyTimestamp), 50/page pagination,
+  "0 results" state.
+- Toolbar links on the tree page; integration test (Docker-gated) covering
+  F4 partial success + F7 subtree export against live OpenLDAP.

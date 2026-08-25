@@ -1,0 +1,18 @@
+{{define "import-form-content"}}
+<section aria-labelledby="import-title">
+  <h1 id="import-title">Import LDIF</h1>
+  <form method="post" action="/api/import" enctype="multipart/form-data">
+    <div class="form-field">
+      <label><input type="checkbox" name="dry_run" value="1"> Dry run (validate only, no LDAP writes)</label>
+    </div>
+    <div class="form-field">
+      <label for="ldif-file">LDIF file</label>
+      <input type="file" id="ldif-file" name="ldif" accept=".ldif,text/plain" required>
+      <p class="field-help">Max 100&nbsp;MB. Malformed entries are skipped and reported; import continues (AE5).</p>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="primary">Import</button>
+    </div>
+  </form>
+</section>
+{{end}}

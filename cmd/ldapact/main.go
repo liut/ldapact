@@ -17,9 +17,12 @@ import (
 	"github.com/liut/ldapact"
 	"github.com/liut/ldapact/pkg/authn"
 	"github.com/liut/ldapact/pkg/config"
+	"github.com/liut/ldapact/pkg/entry"
 	"github.com/liut/ldapact/pkg/ldapx"
+	"github.com/liut/ldapact/pkg/ldif"
 	"github.com/liut/ldapact/pkg/logging"
 	"github.com/liut/ldapact/pkg/ratelimit"
+	"github.com/liut/ldapact/pkg/search"
 	"github.com/liut/ldapact/pkg/secheaders"
 	"github.com/liut/ldapact/pkg/session"
 	"github.com/liut/ldapact/pkg/tree"
@@ -156,9 +159,22 @@ func newHandler(deps appDeps) http.Handler {
 	renderer := web.New(web.MustParse(nil))
 	var treeBrowser *tree.Tree
 	var schemaBrowser *tree.SchemaBrowser
+	var entryHandler *entry.Handler
+	var importHandler *ldif.ImportHandler
+	var exportHandler *ldif.ExportHandler
+	var searchHandler *search.Handler
 	if deps.ldap != nil {
 		treeBrowser = tree.NewTree(deps.ldap, renderer, deps.logger)
 		schemaBrowser = tree.NewSchemaBrowser(deps.ldap, renderer)
+		templatesDir := ""
+		if deps.cfg != nil {
+			templatesDir = deps.cfg.TemplatesDir
+		}
+		loader := entry.NewTemplateLoader(ldapact.Templates(), templatesDir)
+		entryHandler = entry.New(deps.ldap, renderer, deps.logger, loader, deps.store, deps.cfg)
+		importHandler = ldif.NewImportHandler(deps.ldap, renderer, deps.logger)
+		exportHandler = ldif.NewExportHandler(deps.ldap, deps.logger)
+		searchHandler = search.New(deps.ldap, renderer)
 	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -192,6 +208,20 @@ func newHandler(deps appDeps) http.Handler {
 		mux.HandleFunc("GET /api/schema/objectclass/{name}", schemaBrowser.ObjectClassDetail)
 		mux.HandleFunc("GET /api/schema/attribute", schemaBrowser.Attributes)
 		mux.HandleFunc("GET /api/schema/attribute/{name}", schemaBrowser.AttributeDetail)
+		mux.HandleFunc("GET /api/template/{name}", entryHandler.CreateForm)
+		mux.HandleFunc("POST /api/template/{name}/create", entryHandler.CreateSubmit)
+		mux.HandleFunc("GET /api/entry/{dn...}", entryHandler.Detail)
+		mux.HandleFunc("GET /api/entry/{dn...}/password", entryHandler.PasswordForm)
+		mux.HandleFunc("POST /api/entry/{dn...}/password", entryHandler.PasswordChange)
+		mux.HandleFunc("GET /api/entry/{dn...}/delete", entryHandler.DeleteForm)
+		mux.HandleFunc("POST /api/entry/{dn...}/delete", entryHandler.DeleteSubmit)
+		mux.HandleFunc("GET /api/entry/{dn...}/rename", entryHandler.RenameForm)
+		mux.HandleFunc("POST /api/entry/{dn...}/rename", entryHandler.RenameSubmit)
+		mux.HandleFunc("GET /api/import", importHandler.Form)
+		mux.HandleFunc("POST /api/import", importHandler.Submit)
+		mux.HandleFunc("GET /api/import/report/{id}", importHandler.Report)
+		mux.HandleFunc("GET /api/export", exportHandler.Export)
+		mux.HandleFunc("GET /api/search", searchHandler.Search)
 	}
 
 	var h http.Handler = mux

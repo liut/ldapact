@@ -1,6 +1,11 @@
 {{define "tree-page-content"}}
 <section aria-labelledby="tree-title">
   <h1 id="tree-title">Directory</h1>
+  <nav class="toolbar" aria-label="Tools">
+    <a class="secondary" href="/api/search">Search</a>
+    <a class="secondary" href="/api/import">Import LDIF</a>
+    <a class="secondary" href="/api/export?dn={{.RootDN | urlquery}}&amp;scope=subtree">Export subtree</a>
+  </nav>
   <div class="status-region" role="status" aria-live="polite" id="tree-status"></div>
   <ul role="tree" aria-label="Directory tree" id="directory-tree">
     <li role="treeitem" aria-level="1" aria-expanded="false" data-dn="{{.RootDN}}">

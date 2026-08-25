@@ -1,0 +1,25 @@
+{{define "import-result-content"}}
+<section aria-labelledby="import-result-title">
+  <h1 id="import-result-title">Import result</h1>
+  {{if .Error}}<div class="error-box" role="alert">{{.Error}}</div>{{end}}
+  {{if .DryRun}}<p class="muted">Dry run — no entries were written.</p>{{end}}
+  <p>Success: <strong>{{.Success}}</strong> — Failed: <strong>{{.Failures}}</strong></p>
+  {{if .ReportURL}}<p><a href="{{.ReportURL}}">Download error report (import-errors-&lt;timestamp&gt;.txt)</a></p>{{end}}
+  {{if .Rows}}
+  <h2>Failed entries</h2>
+  <table>
+    <thead><tr><th scope="col">Line</th><th scope="col">Reason</th><th scope="col">Raw LDIF</th></tr></thead>
+    <tbody>
+      {{range .Rows}}
+      <tr>
+        <td>{{.Line}}</td>
+        <td>{{.Reason}}</td>
+        <td><pre class="raw-ldif">{{.Raw}}</pre></td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{end}}
+  <p><a href="/api/import">Import another file</a></p>
+</section>
+{{end}}
