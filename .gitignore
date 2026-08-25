@@ -1,4 +1,36 @@
+# Build artifacts
 /bin/
+/dist/
+*.exe
+*.exe~
+
+# Go test & coverage artifacts
+coverage.out
+coverage.html
+*.test
+*.prof
+
+# Local configuration
+.env
+.env.*
+!.env.example
+config/*.local.yaml
+
+# Logs & runtime data
+*.log
 *.db
 *.db.lock
-coverage.out
+
+# Editor & IDE
+.idea/
+.vscode/
+.fleet/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+
+# Local agent/tool settings
+*.local.*
