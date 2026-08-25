@@ -64,16 +64,23 @@
   }
 
   function bind(config) {
-    if (!config || !config.source || !config.target) return;
-    var source = document.getElementById(config.source);
-    if (!source) return;
-    source.addEventListener("change", function () {
+    if (!config || !config.target) return;
+    var sources = config.sources || (config.source ? [config.source] : []);
+    if (!sources.length) return;
+    var els = sources.map(function (id) { return document.getElementById(id); });
+    if (!els.every(function (el) { return !!el; })) return;
+    function refresh() {
       var target = document.getElementById(config.target);
       if (!target) return;
       var values = {};
-      values[config.source] = source.value;
+      els.forEach(function (el, i) {
+        values[sources[i]] = el.value;
+      });
       var filled = applyTemplate(config.template, values);
       if (filled !== "") target.value = filled;
+    }
+    els.forEach(function (el) {
+      el.addEventListener("change", refresh);
     });
   }
 

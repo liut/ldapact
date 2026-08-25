@@ -1,0 +1,7 @@
+{{define "result-page"}}
+<section aria-labelledby="result-title">
+  <h1 id="result-title">{{.Title}}</h1>
+  <div class="{{if .Error}}error-box{{else}}success-box{{end}}" role="{{if .Error}}alert{{else}}status{{end}}">{{.Message}}</div>
+  {{if .Link}}<p><a href="{{.Link}}">{{.LinkText}}</a></p>{{end}}
+</section>
+{{end}}

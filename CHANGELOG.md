@@ -94,3 +94,33 @@ unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
   lifecycle, "N children loaded" announcement, and `X-Mutated-Subtree` refresh
   hook for F2/F5/F6 cross-flow consistency.
 - Integration test against testcontainers-go OpenLDAP (skips without Docker).
+
+## U6 — Template engine + entry flows (F2/F3/F5/F6/F-Detail)
+
+- `pkg/tplengine`: phpLDAPadmin template.dtd-compatible XML parser (strict:
+  unknown elements/duplicate ids/missing title/rdn fail at load), typed model
+  with pages/orders/kinds, and the full R8 server-macro allowlist
+  (PickList/GetNextNumber search+pool/PASSWORDEncrypt/PasswordEncryptionTypes/
+  HashPassword/RandomPassword/Join/Default/DN/Encoded/Escape/Binary/
+  HasMultiples/MultiList) with unknown functions rejected at parse time.
+  autoFill client macros compile to JS fragments consumed by autofill.js
+  (multi-source bindings). Regression corpus: all 9 phpLDAPadmin creation
+  templates parse unmodified (plan's key quality gate); parser.go coverage
+  95%, macros_server.go 93%.
+- `pkg/tplengine/password.go`: RFC 2307 hashing with KTD 6 write whitelist
+  (SSHA512/SSHA256/SSHA/SHA512/SHA256/ARGON2ID/MD4-UTF16LE), read-only
+  verification for legacy MD5/SMD5/SHA/BLOWFISH/crypt family, {PLAIN} rejected
+  unless `password_plain_override` is set (structured warn).
+- `pkg/entry`: F-Detail page with breadcrumbs + action links; F2 wizard
+  (single-page multi-section form with step indicator — server-side per-page
+  session state deferred, see notes) evaluating PickList/GetNextNumber at
+  render, server-side required-field revalidation, post-hook password hashing,
+  inline schema-violation errors with rollback link, `X-Mutated-Subtree`
+  header; F3 password change (detect scheme, SSHA512 default, ppolicy error
+  mapping, AE4 bind verification); F5 delete confirmation with typed-DN for
+  non-leaf entries and ceiling-gated recursive delete; F6 rename/move with
+  target-parent existence check.
+- R15 audit lines emitted for every mutation (event/actor/dn/op_type; user
+  password values never logged).
+- Integration test (testcontainers-go OpenLDAP, Docker-gated) exercising
+  F2→bind→F3→F6→F5 against a live directory (AE3/AE4).

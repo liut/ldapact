@@ -1,0 +1,24 @@
+{{define "rename-form-content"}}
+<section aria-labelledby="rename-title">
+  <h1 id="rename-title">Rename / move entry</h1>
+  <p class="muted">{{.DN}}</p>
+  {{if .Error}}<div class="error-box" role="alert">{{.Error}}</div>{{end}}
+  <form method="post" action="/api/entry/{{.DN | urlquery}}/rename">
+    <div class="form-field">
+      <label for="new-rdn">New RDN</label>
+      <input type="text" id="new-rdn" name="new_rdn" value="{{.NewRDN}}" placeholder="cn=newvalue" required>
+    </div>
+    <div class="form-field">
+      <label for="new-superior">New parent DN (optional; empty keeps the current parent)</label>
+      <input type="text" id="new-superior" name="new_superior" value="{{.NewSuperior}}" placeholder="{{.ParentDN}}">
+    </div>
+    <div class="form-field">
+      <label><input type="checkbox" name="delete_old_rdn" value="1" {{if .DeleteOldRDN}}checked{{end}}> Delete old RDN value</label>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="primary">Rename</button>
+      <a class="secondary" href="/api/entry/{{.DN | urlquery}}">Cancel</a>
+    </div>
+  </form>
+</section>
+{{end}}

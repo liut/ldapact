@@ -48,3 +48,22 @@ expect(applyTemplate("%GIVENNAME%", { givenName: "Bob" }), "Bob", "case-insensit
 expect(applyTemplate("%emoji|0-1/U%", { emoji: "😀x" }), "😀", "unicode slice keeps astral pair");
 
 console.log("autofill_test.js: all assertions passed");
+
+// bind() gathers values from all sources on any change.
+const els = {};
+global.document = {
+  getElementById: (id) => els[id] || null,
+  addEventListener: () => {}
+};
+els.givenName = { value: "Alice", addEventListener: (t, fn) => { els.givenName.fn = fn; } };
+els.sn = { value: "Smith", addEventListener: (t, fn) => { els.sn.fn = fn; } };
+els.cn = { value: "", addEventListener: () => {} };
+global.window.LDAPAutofill.bind({
+  sources: ["givenName", "sn"],
+  target: "cn",
+  template: "%givenName% %sn%"
+});
+els.givenName.fn();
+assert.strictEqual(els.cn.value, "Alice Smith", "bind gathers all source values");
+
+console.log("autofill bind() multi-source: passed");

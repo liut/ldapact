@@ -1,0 +1,147 @@
+// Package entry implements the template-driven flows F2 (create), F3
+// (password change), F5 (delete), F6 (rename), and the F-Detail entry view.
+package entry
+
+import (
+	"context"
+	"errors"
+	"io/fs"
+	"log/slog"
+	"net/http"
+	"os"
+	"strings"
+
+	"github.com/go-ldap/ldap/v3"
+	"github.com/liut/ldapact/pkg/authn"
+	"github.com/liut/ldapact/pkg/config"
+	"github.com/liut/ldapact/pkg/ldapx"
+	"github.com/liut/ldapact/pkg/session"
+	"github.com/liut/ldapact/pkg/tplengine"
+	"github.com/liut/ldapact/pkg/web"
+)
+
+// EntryClient is the LDAP surface the flows need. *ldapx.Client implements it.
+type EntryClient interface {
+	Search(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error)
+	Add(ctx context.Context, dn string, attrs map[string][]string) error
+	Modify(ctx context.Context, dn string, changes []ldap.Change) error
+	Delete(ctx context.Context, dn string) error
+	ModifyDN(ctx context.Context, dn, newRDN string, deleteOldRDN bool, newSuperior string) error
+	Schema() *ldapx.Schema
+	BaseDN() string
+}
+
+// Handler serves the entry and template routes.
+type Handler struct {
+	client   EntryClient
+	render   *web.Renderer
+	logger   *slog.Logger
+	loader   *TemplateLoader
+	sessions *session.Store
+	cfg      *config.Config
+}
+
+// ResultData drives the generic result page (success/error).
+type ResultData struct {
+	Title    string
+	Message  string
+	Link     string
+	LinkText string
+	Error    bool
+}
+
+// New builds the flow handler.
+func New(client EntryClient, renderer *web.Renderer, logger *slog.Logger, loader *TemplateLoader, sessions *session.Store, cfg *config.Config) *Handler {
+	return &Handler{client: client, render: renderer, logger: logger, loader: loader, sessions: sessions, cfg: cfg}
+}
+
+// TemplateLoader resolves template names from the embedded corpus and an
+// optional server-profile custom directory (R7 custom loads).
+type TemplateLoader struct {
+	corpus    fs.FS
+	customDir string
+}
+
+// NewTemplateLoader builds a loader. corpus is the embedded templates FS;
+// customDir may be empty.
+func NewTemplateLoader(corpus fs.FS, customDir string) *TemplateLoader {
+	return &TemplateLoader{corpus: corpus, customDir: customDir}
+}
+
+// Load opens {name}.xml: custom directory first, then the embedded
+// creation corpus. Template names must be simple (no path separators).
+func (l *TemplateLoader) Load(name string) (*tplengine.Template, error) {
+	if name == "" || strings.ContainsAny(name, "/\\.") {
+		return nil, errors.New("entry: invalid template name")
+	}
+	rel := "creation/" + name + ".xml"
+	if l.customDir != "" {
+		p := l.customDir + "/" + rel
+		if f, err := os.Open(p); err == nil {
+			defer f.Close()
+			return tplengine.Parse(f, p)
+		}
+	}
+	f, err := l.corpus.Open(rel)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return tplengine.Parse(f, rel)
+}
+
+// renderPage renders a full page via the shared layout.
+func (h *Handler) renderPage(w http.ResponseWriter, title, content string, data any) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := h.render.Page(w, title, content, data); err != nil {
+		h.logger.Error("render page", "event", "web.render_failed", "template", content, "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
+}
+
+// actor extracts the bind DN (R15 actor semantics) from the request session.
+func actor(r *http.Request) string {
+	if s := authn.SessionFrom(r.Context()); s != nil && s.Value != nil {
+		return s.Value.ProfileRef
+	}
+	return ""
+}
+
+// audit logs a mutation event with the R15 shape and never any password
+// values (redaction happens at the logger boundary; SafeAttr for call sites).
+func (h *Handler) audit(r *http.Request, event, dn, opType string) {
+	h.logger.Info("ldap mutation",
+		"event", event,
+		"actor", actor(r),
+		"dn", dn,
+		"op_type", opType)
+}
+
+// isNotFound reports whether an LDAP error means the entry is missing.
+func isNotFound(err error) bool {
+	var lerr *ldapx.LDAPError
+	if errors.As(err, &lerr) {
+		return lerr.Code == ldap.LDAPResultNoSuchObject
+	}
+	return false
+}
+
+// escapeRDNValue escapes an RDN value for use in a DN (RFC 4514 subset).
+func escapeRDNValue(v string) string {
+	var sb strings.Builder
+	for i := 0; i < len(v); i++ {
+		c := v[i]
+		switch {
+		case c == ',' || c == '+' || c == '"' || c == '\\' || c == '<' || c == '>' || c == ';' || c == '=':
+			sb.WriteByte('\\')
+			sb.WriteByte(c)
+		case c == ' ' && (i == 0 || i == len(v)-1):
+			sb.WriteString(`\ `)
+		case c == '#' && i == 0:
+			sb.WriteString(`\#`)
+		default:
+			sb.WriteByte(c)
+		}
+	}
+	return sb.String()
+}

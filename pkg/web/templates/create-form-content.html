@@ -1,0 +1,31 @@
+{{define "create-form-content"}}
+<section aria-labelledby="create-title">
+  <h1 id="create-title">Create: {{.Title}}</h1>
+  {{if .Description}}<p>{{.Description}}</p>{{end}}
+  <p class="muted">Object classes: {{join .ObjectClasses ", "}}</p>
+  {{if index .Errors "_form"}}<div class="error-box" role="alert">{{index .Errors "_form"}} <a href="/api/entry/{{.Container | urlquery}}">Back (rollback)</a></div>{{end}}
+  <form method="post" action="/api/template/{{.TemplateName}}/create" id="create-form">
+    <input type="hidden" name="container" value="{{.Container}}">
+    <ol class="step-indicator">
+      {{range $i, $p := .Pages}}
+      <li {{if eq $i 0}}aria-current="step"{{end}}>Page {{$p}}</li>
+      {{end}}
+    </ol>
+    {{range $p := .Pages}}
+    <fieldset role="region" aria-labelledby="page-{{$p}}-title">
+      <legend id="page-{{$p}}-title">Page {{$p}}</legend>
+      {{range $f := $.Attributes}}
+      {{if eq $f.Page $p}}
+      {{template "form-field.html" $f}}
+      {{end}}
+      {{end}}
+    </fieldset>
+    {{end}}
+    <div class="form-actions">
+      <button type="submit" class="primary">Create entry</button>
+      <a class="secondary" href="/api/entry/{{.Container | urlquery}}">Cancel</a>
+    </div>
+  </form>
+  {{range .Autofill}}<script>{{safeHTML .}}</script>{{end}}
+</section>
+{{end}}

@@ -61,6 +61,9 @@ type LDAPConfig struct {
 	SchemaCompat string    `yaml:"schema_compat"`
 	TreeFilter   string    `yaml:"tree_filter"`
 	PoolSize     int       `yaml:"pool_size"`
+	// PasswordPlainOverride permits {PLAIN} writes (KTD 6). Off by default;
+	// enabling it emits a structured warn on every plaintext write.
+	PasswordPlainOverride bool `yaml:"password_plain_override"`
 }
 
 // SessionConfig carries the cookie/session security settings (R13, KTD 8).

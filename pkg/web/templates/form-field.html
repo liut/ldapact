@@ -1,0 +1,23 @@
+{{define "form-field.html"}}
+<div class="form-field">
+  {{if .Hidden}}{{else}}
+  <label for="f-{{.ID}}">{{.Display}}{{if .Required}} <span aria-hidden="true">*</span>{{end}}</label>
+  {{if .HelpText}}<p class="field-help" id="help-{{.ID}}">{{.HelpText}}</p>{{end}}
+  {{if eq .Kind "select"}}
+  <select id="f-{{.ID}}" name="{{.ID}}" {{if .Required}}required{{end}} {{if .Error}}aria-invalid="true" aria-describedby="err-{{.ID}}"{{end}}>
+    {{if .NoMatches}}<option value="">(no candidates)</option>{{end}}
+    {{range .Values}}<option value="{{.ID}}">{{.Display}}</option>{{end}}
+  </select>
+  {{else if eq .Kind "textarea"}}
+  <textarea id="f-{{.ID}}" name="{{.ID}}" rows="4" {{if .Required}}required{{end}} {{if .Error}}aria-invalid="true" aria-describedby="err-{{.ID}}"{{end}}>{{.Value}}</textarea>
+  {{else if eq .Kind "password"}}
+  <input type="password" id="f-{{.ID}}" name="{{.ID}}" value="{{.Value}}" autocomplete="new-password" {{if .Required}}required{{end}} {{if .Error}}aria-invalid="true" aria-describedby="err-{{.ID}}"{{end}}>
+  {{else}}
+  <input type="text" id="f-{{.ID}}" name="{{.ID}}" value="{{.Value}}" {{if .Readonly}}readonly{{end}} {{if .Required}}required{{end}} {{if .Error}}aria-invalid="true" aria-describedby="err-{{.ID}}"{{end}}>
+  {{end}}
+  {{if .NoMatches}}<p class="notice">未找到候选</p>{{end}}
+  {{if .MaxHit}}<p class="notice" role="alert">{{.Notice}}</p>{{end}}
+  {{if .Error}}<p class="field-error" id="err-{{.ID}}" role="alert">{{.Error}}</p>{{end}}
+  {{end}}
+</div>
+{{end}}
