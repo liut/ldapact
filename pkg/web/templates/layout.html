@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{block "title" .}}ldapact{{end}}</title>
+  <title>{{.Title}}</title>
   <link rel="stylesheet" href="/static/css/main.css">
   <link rel="stylesheet" href="/static/css/tree.css">
   <link rel="stylesheet" href="/static/css/forms.css">
@@ -16,7 +16,7 @@
     <span class="site-title">ldapact</span>
   </header>
   <main id="main-content" role="main" class="site-main" tabindex="-1">
-    {{template "content" .}}
+    {{.Body}}
   </main>
   <footer class="site-footer" role="contentinfo">
     <p>ldapact — LDAP administration</p>

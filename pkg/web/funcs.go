@@ -14,6 +14,7 @@ func FuncMap() template.FuncMap {
 		"dict":     dict,
 		"join":     strings.Join,
 		"safeHTML": func(s string) template.HTML { return template.HTML(s) },
+		"add":      func(a, b int) int { return a + b },
 	}
 }
 

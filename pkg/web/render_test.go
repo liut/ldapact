@@ -43,7 +43,7 @@ func TestRenderTreeRowFragment(t *testing.T) {
 
 func TestRenderFullPage(t *testing.T) {
 	var buf bytes.Buffer
-	err := renderer(t).Page(&buf, "layout.html", nil)
+	err := renderer(t).Page(&buf, "ldapact", "home-content", nil)
 	if err != nil {
 		t.Fatalf("Page: %v", err)
 	}

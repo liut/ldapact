@@ -22,6 +22,7 @@ import (
 	"github.com/liut/ldapact/pkg/ratelimit"
 	"github.com/liut/ldapact/pkg/secheaders"
 	"github.com/liut/ldapact/pkg/session"
+	"github.com/liut/ldapact/pkg/tree"
 	"github.com/liut/ldapact/pkg/web"
 )
 
@@ -153,13 +154,23 @@ type appDeps struct {
 func newHandler(deps appDeps) http.Handler {
 	mux := http.NewServeMux()
 	renderer := web.New(web.MustParse(nil))
+	var treeBrowser *tree.Tree
+	var schemaBrowser *tree.SchemaBrowser
+	if deps.ldap != nil {
+		treeBrowser = tree.NewTree(deps.ldap, renderer, deps.logger)
+		schemaBrowser = tree.NewSchemaBrowser(deps.ldap, renderer)
+	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintln(w, `{"status":"ok"}`)
 	})
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := renderer.Page(w, "layout.html", nil); err != nil {
+		if deps.ldap != nil {
+			treeBrowser.HomePage(w, r)
+			return
+		}
+		if err := renderer.Page(w, "ldapact", "home-content", nil); err != nil {
 			deps.logger.Error("render home page", "event", "web.render_failed", "error", err)
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		}
@@ -175,6 +186,13 @@ func newHandler(deps appDeps) http.Handler {
 		fmt.Fprintf(w, `<!doctype html><html><head><title>Session expired — ldapact</title></head><body><main role="main"><h1>Session expired</h1><p>Your session expired. <a href="%s">Continue to ldapact</a>.</p></main></body></html>`, html.EscapeString(next))
 	})
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(ldapact.Assets())))
+	if treeBrowser != nil {
+		mux.HandleFunc("GET /api/tree/{dn...}/children", treeBrowser.Children)
+		mux.HandleFunc("GET /api/schema/objectclass", schemaBrowser.ObjectClasses)
+		mux.HandleFunc("GET /api/schema/objectclass/{name}", schemaBrowser.ObjectClassDetail)
+		mux.HandleFunc("GET /api/schema/attribute", schemaBrowser.Attributes)
+		mux.HandleFunc("GET /api/schema/attribute/{name}", schemaBrowser.AttributeDetail)
+	}
 
 	var h http.Handler = mux
 	h = ratelimit.New(60, 120).Handler(h)

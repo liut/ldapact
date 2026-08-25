@@ -6,6 +6,56 @@
   var loader = null;
   var activeTree = null;
 
+  function announce(msg) {
+    var region = document.getElementById("tree-status");
+    if (region) region.textContent = msg;
+  }
+
+  function cssEscape(value) {
+    if (typeof CSS !== "undefined" && CSS.escape) return CSS.escape(value);
+    return String(value).replace(/"/g, '\\"');
+  }
+
+  function refreshSubtree(dn) {
+    var item = document.querySelector('[role="treeitem"][data-dn="' + cssEscape(dn) + '"]');
+    if (!item || item.getAttribute("aria-expanded") !== "true") return;
+    var container = item.querySelector(".tree-children");
+    if (!container) return;
+    item.setAttribute("aria-busy", "true");
+    var btn = item.querySelector(".tree-toggle");
+    if (btn) htmx.trigger(btn, "click");
+  }
+
+  // htmx integration (U5): expansions fetch children via hx-get; after the
+  // swap we clear aria-busy, announce the loaded count, and honor the
+  // X-Mutated-Subtree header emitted by F2/F5/F6 responses (cross-flow tree
+  // consistency).
+  function wireHtmx() {
+    if (typeof htmx === "undefined" || loader) return;
+    loader = function (node) {
+      node.setAttribute("aria-busy", "true");
+      var btn = node.querySelector(".tree-toggle");
+      if (btn) htmx.trigger(btn, "click");
+    };
+    htmx.on("htmx:afterSwap", function (evt) {
+      var target = evt.detail.target;
+      var item = target && target.closest ? target.closest('[role="treeitem"]') : null;
+      if (item) {
+        item.setAttribute("aria-busy", "false");
+        if (target.querySelectorAll) {
+          var count = target.querySelectorAll(':scope > [role="treeitem"]').length;
+          announce(count + " children loaded");
+        }
+      }
+    });
+    htmx.on("htmx:afterRequest", function (evt) {
+      var xhr = evt.detail.xhr;
+      if (!xhr) return;
+      var mutated = xhr.getResponseHeader("X-Mutated-Subtree");
+      if (mutated) refreshSubtree(mutated);
+    });
+  }
+
   function flatten(tree) {
     var out = [];
     (function walk(el) {
@@ -163,4 +213,5 @@
   } else {
     global.LDAPTree.init();
   }
+  wireHtmx();
 })(window);

@@ -1,0 +1,20 @@
+{{define "schema-detail-content"}}
+<section aria-labelledby="schema-detail-title">
+  <h1 id="schema-detail-title">{{.Name}}</h1>
+  <dl>
+    <dt>OID</dt><dd>{{.OID}}</dd>
+    {{if .Kind}}<dt>Kind</dt><dd>{{.Kind}}</dd>{{end}}
+    {{if .Desc}}<dt>Description</dt><dd>{{.Desc}}</dd>{{end}}
+    {{if .Sup}}<dt>Sup</dt><dd>{{range .Sup}}<a href="{{.URL}}">{{.Name}}</a> {{end}}</dd>{{end}}
+    {{if .Syntax}}<dt>Syntax</dt><dd>{{.Syntax}}</dd>{{end}}
+    {{if .Equality}}<dt>Equality</dt><dd>{{.Equality}}</dd>{{end}}
+    {{if .Ordering}}<dt>Ordering</dt><dd>{{.Ordering}}</dd>{{end}}
+    {{if .Substr}}<dt>Substring</dt><dd>{{.Substr}}</dd>{{end}}
+    {{if .Must}}<dt>MUST</dt><dd>{{range .Must}}<a href="{{.URL}}">{{.Name}}</a> {{end}}</dd>{{end}}
+    {{if .May}}<dt>MAY</dt><dd>{{range .May}}<a href="{{.URL}}">{{.Name}}</a> {{end}}</dd>{{end}}
+    {{if .SingleValue}}<dt>Single value</dt><dd>yes</dd>{{end}}
+    {{if .Usage}}<dt>Usage</dt><dd>{{.Usage}}</dd>{{end}}
+  </dl>
+  <p><a href="/api/schema/{{.BackList}}">Back to {{.BackList}} list</a></p>
+</section>
+{{end}}

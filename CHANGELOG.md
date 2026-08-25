@@ -74,3 +74,23 @@ unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
 - `main.go`: fail-fast startup LDAP bind via `ldapx.New` (R14/AE1), session
   store + sweep loop, signal-aware shutdown; `/healthz` and `/static/` skip
   session minting; minimal `/login` landing page.
+
+## U5 — Tree browse (F1) + schema browser (R5)
+
+- `pkg/tree`: paged `GET /api/tree/{dn...}/children` HTMX fragments with the
+  ARIA tree pattern (aria-level/setsize/posinset/expanded, aria-disabled empty
+  and inaccessible states, `role="alert"` errors distinguishing
+  size-limit-exceeded from network failure, "Load more" pagination).
+  Leaf detection mirrors phpLDAPadmin's `hassubordinates` operational
+  attribute; breadcrumb trails stop at the base DN and collapse deep trails to
+  3 + ellipsis + 2.
+- Schema browser (R5/R5.x): objectClass + attributeType lists and detail pages
+  with MUST/MAY and SUP cross-navigation, syntax/matching/single-value
+  rendering, from the U2 subschema cache.
+- Full-page render pipeline upgraded to content-template + layout wrapper
+  (html/template cannot dispatch dynamic template names); home page becomes
+  the tree scaffold rooted at the base DN (AE1).
+- `tree-keys.js` htmx integration: expand → hx-get children, aria-busy
+  lifecycle, "N children loaded" announcement, and `X-Mutated-Subtree` refresh
+  hook for F2/F5/F6 cross-flow consistency.
+- Integration test against testcontainers-go OpenLDAP (skips without Docker).

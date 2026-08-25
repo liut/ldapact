@@ -1,10 +1,18 @@
 package web
 
 import (
+	"bytes"
 	"fmt"
 	"html/template"
 	"io"
 )
+
+// layoutData is injected into layout.html: Body holds the already-escaped
+// output of a content template.
+type layoutData struct {
+	Title string
+	Body  template.HTML
+}
 
 // Renderer executes named templates, either full pages or HTMX fragments.
 // Templates are parsed once at startup and cached for the process lifetime.
@@ -29,8 +37,16 @@ func (r *Renderer) Fragment(w io.Writer, name string, data any) error {
 	return nil
 }
 
-// Page executes a full page template (same mechanics as Fragment; named for
-// readability at call sites).
-func (r *Renderer) Page(w io.Writer, name string, data any) error {
-	return r.Fragment(w, name, data)
+// Page renders a full page: it executes the named content template into a
+// buffer, then wraps it in layout.html. Wrapping after escaping avoids
+// double-escaping while keeping the shell DRY.
+func (r *Renderer) Page(w io.Writer, title, contentName string, data any) error {
+	var buf bytes.Buffer
+	if err := r.Fragment(&buf, contentName, data); err != nil {
+		return err
+	}
+	return r.tmpl.ExecuteTemplate(w, "layout.html", layoutData{
+		Title: title,
+		Body:  template.HTML(buf.String()),
+	})
 }

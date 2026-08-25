@@ -1,0 +1,15 @@
+{{define "tree-page-content"}}
+<section aria-labelledby="tree-title">
+  <h1 id="tree-title">Directory</h1>
+  <div class="status-region" role="status" aria-live="polite" id="tree-status"></div>
+  <ul role="tree" aria-label="Directory tree" id="directory-tree">
+    <li role="treeitem" aria-level="1" aria-expanded="false" data-dn="{{.RootDN}}">
+      <span class="tree-label" title="{{.RootDN}}">{{.RootLabel}}</span>
+      <button type="button" class="tree-toggle" aria-label="Toggle children of {{.RootLabel}}"
+              hx-get="/api/tree/{{.RootDN | urlquery}}/children?page=1&amp;level=2&amp;id=children-root"
+              hx-target="#children-root" hx-swap="innerHTML">▸</button>
+      <div class="tree-children" id="children-root"></div>
+    </li>
+  </ul>
+</section>
+{{end}}

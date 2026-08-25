@@ -1,0 +1,19 @@
+{{define "schema-list-content"}}
+<section aria-labelledby="schema-title">
+  <h1 id="schema-title">{{.Title}}</h1>
+  <table>
+    <thead>
+      <tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Description</th></tr>
+    </thead>
+    <tbody>
+      {{range .Rows}}
+      <tr>
+        <td><a href="{{.URL}}">{{.Name}}</a></td>
+        <td>{{.Kind}}</td>
+        <td>{{.Desc}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</section>
+{{end}}
