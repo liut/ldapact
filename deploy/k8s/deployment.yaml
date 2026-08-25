@@ -1,0 +1,112 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ldapact-config
+data:
+  ldapact.yaml: |
+    server:
+      listen: "0.0.0.0:8080"
+    ldap:
+      url: "ldap://ldap.example.com:389"
+      base_dn: "dc=example,dc=com"
+      bind_dn: "cn=admin,dc=example,dc=com"
+      tls:
+        min_version: "TLSv1.2"
+        verify: true
+        start_tls: true
+        cert_expiry_fail_closed: true
+      schema_compat: "openldap"
+      pool_size: 8
+    session:
+      timeout_minutes: 30
+      absolute_timeout_minutes: 480
+      expired_action: "retry_bind"
+      db_path: "/var/lib/ldapact/sessions.db"
+    log_level: "info"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ldapact-bind
+type: Opaque
+stringData:
+  bind-password: "CHANGE-ME"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ldapact
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ldapact
+  template:
+    metadata:
+      labels:
+        app: ldapact
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+      containers:
+        - name: ldapact
+          image: ghcr.io/liut/ldapact:latest
+          args: ["-config", "/etc/ldapact/ldapact.yaml"]
+          ports:
+            - containerPort: 8080
+          env:
+            - name: LDAPADM_BIND_PASSWORD_FILE
+              value: /etc/ldapact/bind-password
+          volumeMounts:
+            - name: config
+              mountPath: /etc/ldapact
+              readOnly: true
+            - name: sessions
+              mountPath: /var/lib/ldapact
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: config
+          projected:
+            sources:
+              - configMap:
+                  name: ldapact-config
+                  items:
+                    - key: ldapact.yaml
+                      path: ldapact.yaml
+              - secret:
+                  name: ldapact-bind
+                  items:
+                    - key: bind-password
+                      path: bind-password
+                      mode: 0600
+        - name: sessions
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ldapact
+spec:
+  selector:
+    app: ldapact
+  ports:
+    - port: 8080
+      targetPort: 8080

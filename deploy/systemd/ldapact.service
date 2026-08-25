@@ -1,0 +1,32 @@
+[Unit]
+Description=ldapact — Go LDAP administration (phpLDAPadmin replacement)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ldapact
+Group=ldapact
+
+# Secret injection: systemd LoadCredential mounts /etc/ldapact/bind-password
+# as a 0600 file; the resolver reads it via LDAPADM_BIND_PASSWORD_FILE.
+Environment=LDAPADM_BIND_PASSWORD_FILE=/run/credentials/ldapact.service/bind-password
+LoadCredential=bind-password:/etc/ldapact/bind-password
+
+ExecStart=/usr/local/bin/ldapact -config /etc/ldapact/ldapact.yaml
+Restart=on-failure
+RestartSec=3s
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadWritePaths=/var/lib/ldapact
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

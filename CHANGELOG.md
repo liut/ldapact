@@ -145,3 +145,21 @@ unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
   "0 results" state.
 - Toolbar links on the tree page; integration test (Docker-gated) covering
   F4 partial success + F7 subtree export against live OpenLDAP.
+
+## U8 — Build, integration harness, deployment, operations
+
+- `internal/app`: handler assembly extracted from the CLI so the end-to-end
+  harness exercises the real middleware/routing stack.
+- `test/integration`: testcontainers-go OpenLDAP harness (TestMain starts and
+  seeds 5 OUs, 1210 users, 3 groups) with F1-F8 flow tests — paged tree,
+  template create + audit redaction (AE3/AE6), password change + bind (AE4),
+  partial-success import (AE5), rename/delete, subtree export, search.
+  Skips cleanly when Docker is unavailable.
+- `Dockerfile`: distroless static image; `-healthcheck` flag for container
+  probes; systemd unit with `LoadCredential`; k8s Deployment/Service with
+  projected config+secret and probes.
+- `Makefile`: `test-integration` target; `govulncheck` in `lint` (with
+  install hint).
+- README (install/config/deployment/security/API surface) and OPERATIONS
+  (secret resolver examples, sessions.db lifecycle, log shipping, TLS
+  rotation, cutover playbook, error-code mapping, v1 pre-launch checklist).
