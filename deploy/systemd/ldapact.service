@@ -8,12 +8,17 @@ Type=simple
 User=ldapact
 Group=ldapact
 
+# Non-secret configuration comes from LDAPADM_* vars in the EnvironmentFile
+# (no config file, no unit edits to change settings). See
+# ldapact.default.example.
+EnvironmentFile=/etc/default/ldapact
+
 # Secret injection: systemd LoadCredential mounts /etc/ldapact/bind-password
 # as a 0600 file; the resolver reads it via LDAPADM_BIND_PASSWORD_FILE.
 Environment=LDAPADM_BIND_PASSWORD_FILE=/run/credentials/ldapact.service/bind-password
 LoadCredential=bind-password:/etc/ldapact/bind-password
 
-ExecStart=/usr/local/bin/ldapact -config /etc/ldapact/ldapact.yaml
+ExecStart=/usr/local/bin/ldapact
 Restart=on-failure
 RestartSec=3s
 

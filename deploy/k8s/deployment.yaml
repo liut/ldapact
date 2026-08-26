@@ -3,26 +3,21 @@ kind: ConfigMap
 metadata:
   name: ldapact-config
 data:
-  ldapact.yaml: |
-    server:
-      listen: "0.0.0.0:8080"
-    ldap:
-      url: "ldap://ldap.example.com:389"
-      base_dn: "dc=example,dc=com"
-      bind_dn: "cn=admin,dc=example,dc=com"
-      tls:
-        min_version: "TLSv1.2"
-        verify: true
-        start_tls: true
-        cert_expiry_fail_closed: true
-      schema_compat: "openldap"
-      pool_size: 8
-    session:
-      timeout_minutes: 30
-      absolute_timeout_minutes: 480
-      expired_action: "retry_bind"
-      db_path: "/var/lib/ldapact/sessions.db"
-    log_level: "info"
+  LDAPADM_LISTEN: "0.0.0.0:8080"
+  LDAPADM_URL: "ldap://ldap.example.com:389"
+  LDAPADM_BASE_DN: "dc=example,dc=com"
+  LDAPADM_BIND_DN: "cn=admin,dc=example,dc=com"
+  LDAPADM_MIN_VERSION: "TLSv1.2"
+  LDAPADM_VERIFY: "true"
+  LDAPADM_START_TLS: "true"
+  LDAPADM_CERT_EXPIRY_FAIL_CLOSED: "true"
+  LDAPADM_SCHEMA_COMPAT: "openldap"
+  LDAPADM_POOL_SIZE: "8"
+  LDAPADM_TIMEOUT_MINUTES: "30"
+  LDAPADM_ABSOLUTE_TIMEOUT_MINUTES: "480"
+  LDAPADM_EXPIRED_ACTION: "retry_bind"
+  LDAPADM_DB_PATH: "/var/lib/ldapact/sessions.db"
+  LDAPADM_LOG_LEVEL: "info"
 ---
 apiVersion: v1
 kind: Secret
@@ -52,14 +47,16 @@ spec:
       containers:
         - name: ldapact
           image: ghcr.io/liut/ldapact:latest
-          args: ["-config", "/etc/ldapact/ldapact.yaml"]
           ports:
             - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: ldapact-config
           env:
             - name: LDAPADM_BIND_PASSWORD_FILE
               value: /etc/ldapact/bind-password
           volumeMounts:
-            - name: config
+            - name: bind-password
               mountPath: /etc/ldapact
               readOnly: true
             - name: sessions
@@ -83,20 +80,13 @@ spec:
             limits:
               memory: 256Mi
       volumes:
-        - name: config
-          projected:
-            sources:
-              - configMap:
-                  name: ldapact-config
-                  items:
-                    - key: ldapact.yaml
-                      path: ldapact.yaml
-              - secret:
-                  name: ldapact-bind
-                  items:
-                    - key: bind-password
-                      path: bind-password
-                      mode: 0600
+        - name: bind-password
+          secret:
+            secretName: ldapact-bind
+            items:
+              - key: bind-password
+                path: bind-password
+                mode: 0600
         - name: sessions
           emptyDir: {}
 ---

@@ -35,7 +35,7 @@ govulncheck:
 	@if command -v govulncheck >/dev/null 2>&1; then govulncheck ./...; else echo "govulncheck not installed — run: go install golang.org/x/vuln/cmd/govulncheck@latest"; fi
 
 run:
-	$(GO) run ./cmd/ldapact -config config/example.yaml
+	$(GO) run ./cmd/ldapact
 
 clean:
 	rm -f $(BIN)

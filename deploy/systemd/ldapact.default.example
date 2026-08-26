@@ -1,0 +1,25 @@
+# ldapact environment configuration for systemd.
+#
+# Install this file as /etc/default/ldapact (referenced by ldapact.service
+# via EnvironmentFile) and edit values there — the unit file itself stays
+# untouched. Unknown LDAPADM_* variables fail startup; empty values are
+# treated as unset so defaults apply. Full reference: README "Configuration".
+
+LDAPADM_LISTEN=127.0.0.1:8080
+LDAPADM_URL=ldap://ldap.example.com:389
+LDAPADM_BASE_DN=dc=example,dc=com
+LDAPADM_BIND_DN=cn=admin,dc=example,dc=com
+LDAPADM_MIN_VERSION=TLSv1.2
+LDAPADM_VERIFY=true
+LDAPADM_START_TLS=true
+LDAPADM_CERT_EXPIRY_FAIL_CLOSED=true
+LDAPADM_SCHEMA_COMPAT=openldap
+LDAPADM_POOL_SIZE=8
+LDAPADM_TIMEOUT_MINUTES=30
+LDAPADM_ABSOLUTE_TIMEOUT_MINUTES=480
+LDAPADM_EXPIRED_ACTION=retry_bind
+LDAPADM_DB_PATH=/var/lib/ldapact/sessions.db
+LDAPADM_LOG_LEVEL=info
+
+# Secrets are injected via LoadCredential (LDAPADM_BIND_PASSWORD_FILE is set
+# in the unit); never put secret values in this file.

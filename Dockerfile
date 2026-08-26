@@ -11,4 +11,3 @@ COPY --from=builder /out/ldapact /usr/local/bin/ldapact
 USER nonroot:nonroot
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/ldapact"]
-CMD ["-config", "/etc/ldapact/ldapact.yaml"]
