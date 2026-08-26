@@ -34,3 +34,7 @@ config/*.local.yaml
 
 # Local agent/tool settings
 *.local.*
+
+.claude
+.playwright
+.playwright-cli
