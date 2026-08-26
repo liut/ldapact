@@ -1,9 +1,11 @@
-// Package config loads and validates the ldapact v1 server profile (R12).
+// Package config loads and validates the ldapact v1 server configuration (R12).
 //
-// The profile is read from a YAML file with strict known-field checking:
-// unknown keys fail the parse. Secrets (bind password, auto-number password)
-// are never accepted as YAML values; they are resolved at startup through the
-// secret resolver chain implemented in secret.go.
+// Configuration is read from LDAPADM_* environment variables parsed by
+// github.com/kelseyhightower/envconfig; there is no config file. Startup
+// fails fast on unknown LDAPADM_* variables and on policy violations.
+// Secrets (bind password, auto-number password) are never parsed from the
+// environment; they are resolved at startup through the secret resolver
+// chain implemented in secret.go.
 package config
 
 import (
@@ -13,19 +15,39 @@ import (
 	"os"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"github.com/kelseyhightower/envconfig"
 )
 
-// Env var names. Secrets use the resolver chain in secret.go; the non-secret
-// profile fields below override YAML when set to a non-empty value (R12).
+// Env var names (R12). The non-secret names below are the single source of
+// truth for the strict allowlist; TestEnvTagsMatchConstants pins the
+// envconfig tags to them. Secrets use the resolver chain in secret.go.
 const (
 	BindPasswordEnv       = "LDAPADM_BIND_PASSWORD"
 	AutoNumberPasswordEnv = "LDAPADM_AUTO_NUMBER_PASSWORD"
 
-	ListenEnv = "LDAPADM_LISTEN"
-	URLEnv    = "LDAPADM_URL"
-	BaseDNEnv = "LDAPADM_BASE_DN"
-	BindDNEnv = "LDAPADM_BIND_DN"
+	ListenEnv       = "LDAPADM_LISTEN"
+	URLEnv          = "LDAPADM_URL"
+	BaseDNEnv       = "LDAPADM_BASE_DN"
+	BindDNEnv       = "LDAPADM_BIND_DN"
+	AutoNumberDNEnv = "LDAPADM_AUTO_NUMBER_DN"
+	LogLevelEnv     = "LDAPADM_LOG_LEVEL"
+	TemplatesDirEnv = "LDAPADM_TEMPLATES_DIR"
+
+	TLSMinVersionEnv           = "LDAPADM_MIN_VERSION"
+	TLSVerifyEnv               = "LDAPADM_VERIFY"
+	TLSStartTLSEnv             = "LDAPADM_START_TLS"
+	TLSCertExpiryFailClosedEnv = "LDAPADM_CERT_EXPIRY_FAIL_CLOSED"
+
+	SchemaCompatEnv          = "LDAPADM_SCHEMA_COMPAT"
+	TreeFilterEnv            = "LDAPADM_TREE_FILTER"
+	PoolSizeEnv              = "LDAPADM_POOL_SIZE"
+	PasswordPlainOverrideEnv = "LDAPADM_PASSWORD_PLAIN_OVERRIDE"
+	PasswordSchemeEnv        = "LDAPADM_PASSWORD_SCHEME"
+
+	SessionTimeoutMinutesEnv         = "LDAPADM_TIMEOUT_MINUTES"
+	SessionAbsoluteTimeoutMinutesEnv = "LDAPADM_ABSOLUTE_TIMEOUT_MINUTES"
+	SessionExpiredActionEnv          = "LDAPADM_EXPIRED_ACTION"
+	SessionDBPathEnv                 = "LDAPADM_DB_PATH"
 )
 
 // Defaults (KTD 3, 5, 8; R2, R13).
@@ -51,97 +73,188 @@ const (
 // parse time, StartTLS failures are fatal at runtime, and an expired server
 // certificate refuses startup.
 type TLSConfig struct {
-	MinVersion           string `yaml:"min_version"`
-	Verify               *bool  `yaml:"verify"`
-	StartTLS             *bool  `yaml:"start_tls"`
-	CertExpiryFailClosed *bool  `yaml:"cert_expiry_fail_closed"`
+	MinVersion           string
+	Verify               *bool
+	StartTLS             *bool
+	CertExpiryFailClosed *bool
 }
 
 // LDAPConfig is the single-server profile (R12).
 type LDAPConfig struct {
-	URL          string    `yaml:"url"`
-	BaseDN       string    `yaml:"base_dn"`
-	BindDN       string    `yaml:"bind_dn"`
-	AutoNumberDN string    `yaml:"auto_number_dn"`
-	TLS          TLSConfig `yaml:"tls"`
-	SchemaCompat string    `yaml:"schema_compat"`
-	TreeFilter   string    `yaml:"tree_filter"`
-	PoolSize     int       `yaml:"pool_size"`
+	URL          string
+	BaseDN       string
+	BindDN       string
+	AutoNumberDN string
+	TLS          TLSConfig
+	SchemaCompat string
+	TreeFilter   string
+	PoolSize     int
 	// PasswordPlainOverride permits {PLAIN} writes (KTD 6). Off by default;
 	// enabling it emits a structured warn on every plaintext write.
-	PasswordPlainOverride bool `yaml:"password_plain_override"`
+	PasswordPlainOverride bool
 	// PasswordScheme is the RFC 2307 write scheme (default SSHA512 per KTD 6).
 	// Some directory builds only support legacy schemes ({SSHA} et al.); set
 	// this to one of the write-allowlist names to match the server.
-	PasswordScheme string `yaml:"password_scheme"`
+	PasswordScheme string
 }
 
 // SessionConfig carries the cookie/session security settings (R13, KTD 8).
 type SessionConfig struct {
-	TimeoutMinutes         int    `yaml:"timeout_minutes"`
-	AbsoluteTimeoutMinutes int    `yaml:"absolute_timeout_minutes"`
-	ExpiredAction          string `yaml:"expired_action"`
-	DBPath                 string `yaml:"db_path"`
+	TimeoutMinutes         int
+	AbsoluteTimeoutMinutes int
+	ExpiredAction          string
+	DBPath                 string
 }
 
 // ServerConfig is the HTTP listener section.
 type ServerConfig struct {
-	Listen string `yaml:"listen"`
+	Listen string
 }
 
 // Config is the v1 server profile (R16: a plain struct, not an interface).
 // BindPassword and AutoNumberPassword are runtime-only values filled by
-// ResolveSecrets; they are never parsed from YAML.
+// ResolveSecrets; they are never parsed from the environment.
 type Config struct {
-	Server       ServerConfig  `yaml:"server"`
-	LDAP         LDAPConfig    `yaml:"ldap"`
-	Session      SessionConfig `yaml:"session"`
-	LogLevel     string        `yaml:"log_level"`
-	TemplatesDir string        `yaml:"templates_dir"`
+	Server       ServerConfig
+	LDAP         LDAPConfig
+	Session      SessionConfig
+	LogLevel     string
+	TemplatesDir string
 
-	BindPassword       string `yaml:"-"`
-	AutoNumberPassword string `yaml:"-"`
+	BindPassword       string
+	AutoNumberPassword string
 }
 
-// Load reads, defaults, and validates a config file.
-func Load(path string) (*Config, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("open config %s: %w", path, err)
-	}
-	defer f.Close()
+// envFields is the flat envconfig view of the profile: every non-secret field
+// tagged with its full env var name. envconfig always prepends enclosing
+// struct names to nested-struct keys, so parsing the nested Config directly
+// would produce names like LDAP_LDAPADM_URL; the flat view keeps the
+// LDAPADM_* contract while Config keeps its shape for consumers.
+type envFields struct {
+	Listen        string `envconfig:"LDAPADM_LISTEN"`
+	URL           string `envconfig:"LDAPADM_URL"`
+	BaseDN        string `envconfig:"LDAPADM_BASE_DN"`
+	BindDN        string `envconfig:"LDAPADM_BIND_DN"`
+	AutoNumberDN  string `envconfig:"LDAPADM_AUTO_NUMBER_DN"`
+	LogLevel      string `envconfig:"LDAPADM_LOG_LEVEL"`
+	TemplatesDir  string `envconfig:"LDAPADM_TEMPLATES_DIR"`
+	TLSMinVersion string `envconfig:"LDAPADM_MIN_VERSION"`
 
-	dec := yaml.NewDecoder(f)
-	dec.KnownFields(true)
-	var cfg Config
-	if err := dec.Decode(&cfg); err != nil {
-		return nil, fmt.Errorf("parse config %s: %w", path, err)
+	TLSVerify               *bool `envconfig:"LDAPADM_VERIFY"`
+	TLSStartTLS             *bool `envconfig:"LDAPADM_START_TLS"`
+	TLSCertExpiryFailClosed *bool `envconfig:"LDAPADM_CERT_EXPIRY_FAIL_CLOSED"`
+
+	SchemaCompat          string `envconfig:"LDAPADM_SCHEMA_COMPAT"`
+	TreeFilter            string `envconfig:"LDAPADM_TREE_FILTER"`
+	PoolSize              int    `envconfig:"LDAPADM_POOL_SIZE"`
+	PasswordPlainOverride bool   `envconfig:"LDAPADM_PASSWORD_PLAIN_OVERRIDE"`
+	PasswordScheme        string `envconfig:"LDAPADM_PASSWORD_SCHEME"`
+
+	SessionTimeoutMinutes         int    `envconfig:"LDAPADM_TIMEOUT_MINUTES"`
+	SessionAbsoluteTimeoutMinutes int    `envconfig:"LDAPADM_ABSOLUTE_TIMEOUT_MINUTES"`
+	SessionExpiredAction          string `envconfig:"LDAPADM_EXPIRED_ACTION"`
+	SessionDBPath                 string `envconfig:"LDAPADM_DB_PATH"`
+}
+
+// knownEnvNames is the strict allowlist of LDAPADM_* variables the process
+// understands: every parsed config field plus the secret variables and their
+// _FILE references (R12). Unknown variables fail startup to catch typos.
+var knownEnvNames = func() map[string]struct{} {
+	names := []string{
+		ListenEnv, URLEnv, BaseDNEnv, BindDNEnv, AutoNumberDNEnv,
+		TLSMinVersionEnv, TLSVerifyEnv, TLSStartTLSEnv, TLSCertExpiryFailClosedEnv,
+		SchemaCompatEnv, TreeFilterEnv, PoolSizeEnv,
+		PasswordPlainOverrideEnv, PasswordSchemeEnv,
+		SessionTimeoutMinutesEnv, SessionAbsoluteTimeoutMinutesEnv,
+		SessionExpiredActionEnv, SessionDBPathEnv,
+		LogLevelEnv, TemplatesDirEnv,
+		BindPasswordEnv, BindPasswordEnv + "_FILE",
+		AutoNumberPasswordEnv, AutoNumberPasswordEnv + "_FILE",
 	}
-	cfg.ApplyEnv()
+	m := make(map[string]struct{}, len(names))
+	for _, n := range names {
+		m[n] = struct{}{}
+	}
+	return m
+}()
+
+// Load reads, defaults, and validates the server profile from LDAPADM_*
+// environment variables. Unknown LDAPADM_* variables fail fast (R12's
+// unknown-key strictness, checked on the raw environment so even a
+// set-but-empty unknown var is rejected); set-but-empty known variables are
+// then treated as unset so an empty value never overrides a default (the
+// shipped "empty is ignored" behavior).
+func Load() (*Config, error) {
+	if err := checkAllowedEnv(); err != nil {
+		return nil, err
+	}
+	unsetEmptyEnv()
+
+	var env envFields
+	if err := envconfig.Process("", &env); err != nil {
+		return nil, fmt.Errorf("parse env config: %w", err)
+	}
+	cfg := env.toConfig()
 	if err := cfg.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid config %s: %w", path, err)
+		return nil, err
 	}
 	return &cfg, nil
 }
 
-// ApplyEnv lets environment variables override the YAML profile for the four
-// runtime fields: LDAPADM_LISTEN, LDAPADM_URL, LDAPADM_BASE_DN, and
-// LDAPADM_BIND_DN. An unset or empty variable leaves the YAML value (or its
-// default) untouched, so a blank env var never clears a configured value.
-// Call before Validate; Load already does.
-func (c *Config) ApplyEnv() {
-	if v := os.Getenv(ListenEnv); v != "" {
-		c.Server.Listen = v
+// checkAllowedEnv rejects any LDAPADM_* variable outside the allowlist.
+func checkAllowedEnv() error {
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "LDAPADM_") {
+			continue
+		}
+		name, _, _ := strings.Cut(kv, "=")
+		if _, ok := knownEnvNames[name]; !ok {
+			return fmt.Errorf("unknown environment variable %s", name)
+		}
 	}
-	if v := os.Getenv(URLEnv); v != "" {
-		c.LDAP.URL = v
+	return nil
+}
+
+// unsetEmptyEnv clears set-but-empty LDAPADM_* variables before parsing.
+// envconfig would otherwise fail converting "" to int/bool, or clear a
+// defaulted string; unsetting preserves the shipped "empty is ignored"
+// behavior. Call after checkAllowedEnv so unknown empty vars still fail.
+func unsetEmptyEnv() {
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "LDAPADM_") {
+			continue
+		}
+		name, value, _ := strings.Cut(kv, "=")
+		if value == "" {
+			_ = os.Unsetenv(name)
+		}
 	}
-	if v := os.Getenv(BaseDNEnv); v != "" {
-		c.LDAP.BaseDN = v
-	}
-	if v := os.Getenv(BindDNEnv); v != "" {
-		c.LDAP.BindDN = v
-	}
+}
+
+// toConfig maps the flat envconfig view onto the nested Config shape.
+func (e envFields) toConfig() Config {
+	var c Config
+	c.Server.Listen = e.Listen
+	c.LDAP.URL = e.URL
+	c.LDAP.BaseDN = e.BaseDN
+	c.LDAP.BindDN = e.BindDN
+	c.LDAP.AutoNumberDN = e.AutoNumberDN
+	c.LDAP.TLS.MinVersion = e.TLSMinVersion
+	c.LDAP.TLS.Verify = e.TLSVerify
+	c.LDAP.TLS.StartTLS = e.TLSStartTLS
+	c.LDAP.TLS.CertExpiryFailClosed = e.TLSCertExpiryFailClosed
+	c.LDAP.SchemaCompat = e.SchemaCompat
+	c.LDAP.TreeFilter = e.TreeFilter
+	c.LDAP.PoolSize = e.PoolSize
+	c.LDAP.PasswordPlainOverride = e.PasswordPlainOverride
+	c.LDAP.PasswordScheme = e.PasswordScheme
+	c.Session.TimeoutMinutes = e.SessionTimeoutMinutes
+	c.Session.AbsoluteTimeoutMinutes = e.SessionAbsoluteTimeoutMinutes
+	c.Session.ExpiredAction = e.SessionExpiredAction
+	c.Session.DBPath = e.SessionDBPath
+	c.LogLevel = e.LogLevel
+	c.TemplatesDir = e.TemplatesDir
+	return c
 }
 
 // Validate applies defaults and enforces the R12/KTD constraints. It is safe

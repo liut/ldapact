@@ -3,20 +3,21 @@ module github.com/liut/ldapact
 go 1.27.0
 
 require (
+	github.com/GehirnInc/crypt v0.0.0-20230320061759-8cc1b52080c5
+	github.com/alexedwards/argon2id v1.0.0
 	github.com/go-ldap/ldap/v3 v3.4.14
+	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/testcontainers/testcontainers-go v0.44.0
 	go.etcd.io/bbolt v1.5.0
+	golang.org/x/crypto v0.54.0
 	golang.org/x/term v0.45.0
-	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/Azure/go-ntlmssp v0.1.1 // indirect
-	github.com/GehirnInc/crypt v0.0.0-20230320061759-8cc1b52080c5 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
-	github.com/alexedwards/argon2id v1.0.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/containerd/errdefs v1.0.0 // indirect
@@ -62,6 +63,6 @@ require (
 	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.opentelemetry.io/otel/metric v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
-	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

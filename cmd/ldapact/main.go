@@ -38,12 +38,10 @@ func run(args []string) int {
 	fs := flag.NewFlagSet("ldapact", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	var (
-		configPath  string
 		showVersion bool
 		healthcheck bool
 		healthURL   string
 	)
-	fs.StringVar(&configPath, "config", "config/example.yaml", "path to the server profile YAML")
 	fs.BoolVar(&showVersion, "version", false, "print version and exit")
 	fs.BoolVar(&healthcheck, "healthcheck", false, "check /healthz and exit (container health probes)")
 	fs.StringVar(&healthURL, "health-url", "http://127.0.0.1:8080/healthz", "URL for -healthcheck")
@@ -68,7 +66,7 @@ func run(args []string) int {
 		return 0
 	}
 
-	cfg, err := config.Load(configPath)
+	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ldapact: %v\n", err)
 		return 1
@@ -78,17 +76,10 @@ func run(args []string) int {
 		return 1
 	}
 
-	lvl, err := logging.LevelFromEnv()
+	lvl, err := logging.LevelFromString(cfg.LogLevel)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ldapact: %v\n", err)
 		return 1
-	}
-	if os.Getenv(logging.LevelEnv) == "" {
-		lvl, err = logging.LevelFromString(cfg.LogLevel)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "ldapact: %v\n", err)
-			return 1
-		}
 	}
 	logger := logging.New(lvl, os.Stdout)
 	disableCoreDumps(logger)

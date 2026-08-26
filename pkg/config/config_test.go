@@ -4,20 +4,48 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/kelseyhightower/envconfig"
+	"github.com/liut/ldapact/pkg/logging"
 )
 
-const validMinimal = `
-ldap:
-  url: "ldap://127.0.0.1:389"
-  base_dn: "dc=example,dc=com"
-  bind_dn: "cn=admin,dc=example,dc=com"
-`
+// TestMain keeps the suite hermetic: ambient LDAPADM_* vars from the
+// developer's shell (for example LDAPADM_TEST_* used by the integration
+// harness) would otherwise trip the strict allowlist in Load(). Tests that
+// need a variable set it explicitly with t.Setenv.
+func TestMain(m *testing.M) {
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "LDAPADM_") {
+			continue
+		}
+		name, _, _ := strings.Cut(kv, "=")
+		_ = os.Unsetenv(name)
+	}
+	os.Exit(m.Run())
+}
 
-func TestLoadValidMinimalDefaults(t *testing.T) {
-	path := writeTemp(t, "config.yaml", validMinimal)
-	cfg, err := Load(path)
+// setEnv sets several env vars for the duration of the test.
+func setEnv(t *testing.T, vars map[string]string) {
+	t.Helper()
+	for k, v := range vars {
+		t.Setenv(k, v)
+	}
+}
+
+func minimalEnv() map[string]string {
+	return map[string]string{
+		URLEnv:    "ldap://127.0.0.1:389",
+		BaseDNEnv: "dc=example,dc=com",
+		BindDNEnv: "cn=admin,dc=example,dc=com",
+	}
+}
+
+func TestLoadMinimalEnvDefaults(t *testing.T) {
+	setEnv(t, minimalEnv())
+	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -62,31 +90,30 @@ func TestLoadValidMinimalDefaults(t *testing.T) {
 	}
 }
 
-func TestLoadFull(t *testing.T) {
-	path := writeTemp(t, "config.yaml", `
-server:
-  listen: "0.0.0.0:8443"
-ldap:
-  url: "ldaps://ldap.example.com:636"
-  base_dn: "dc=example,dc=com"
-  bind_dn: "cn=admin,dc=example,dc=com"
-  auto_number_dn: "cn=autonum,ou=svc,dc=example,dc=com"
-  tls:
-    min_version: "TLSv1.3"
-    verify: true
-    cert_expiry_fail_closed: false
-  schema_compat: "389ds"
-  tree_filter: "(objectClass=inetOrgPerson)"
-  pool_size: 16
-session:
-  timeout_minutes: 45
-  absolute_timeout_minutes: 720
-  expired_action: "redirect_to_login"
-  db_path: "/tmp/ldapact-sessions.db"
-log_level: "debug"
-templates_dir: "/etc/ldapact/templates"
-`)
-	cfg, err := Load(path)
+func TestLoadFullEnv(t *testing.T) {
+	setEnv(t, map[string]string{
+		ListenEnv:                        "0.0.0.0:8443",
+		URLEnv:                           "ldap://ldap.example.com:389",
+		BaseDNEnv:                        "dc=example,dc=com",
+		BindDNEnv:                        "cn=admin,dc=example,dc=com",
+		AutoNumberDNEnv:                  "cn=autonum,ou=svc,dc=example,dc=com",
+		TLSMinVersionEnv:                 "TLSv1.3",
+		TLSVerifyEnv:                     "true",
+		TLSStartTLSEnv:                   "true",
+		TLSCertExpiryFailClosedEnv:       "false",
+		SchemaCompatEnv:                  "389ds",
+		TreeFilterEnv:                    "(objectClass=inetOrgPerson)",
+		PoolSizeEnv:                      "16",
+		PasswordPlainOverrideEnv:         "true",
+		PasswordSchemeEnv:                "SSHA512",
+		SessionTimeoutMinutesEnv:         "45",
+		SessionAbsoluteTimeoutMinutesEnv: "720",
+		SessionExpiredActionEnv:          "redirect_to_login",
+		SessionDBPathEnv:                 "/tmp/ldapact-sessions.db",
+		LogLevelEnv:                      "debug",
+		TemplatesDirEnv:                  "/etc/ldapact/templates",
+	})
+	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -99,20 +126,38 @@ templates_dir: "/etc/ldapact/templates"
 	if cfg.LDAP.TLS.MinVersion != "TLSv1.3" {
 		t.Errorf("min_version = %q", cfg.LDAP.TLS.MinVersion)
 	}
-	if cfg.LDAP.TLS.CertExpiryFailClosed == nil || *cfg.LDAP.TLS.CertExpiryFailClosed {
-		t.Error("cert_expiry_fail_closed should be false")
+	if cfg.LDAP.TLS.Verify == nil || !*cfg.LDAP.TLS.Verify {
+		t.Error("tls.verify should be true")
 	}
-	if cfg.LDAP.TLS.StartTLS != nil && *cfg.LDAP.TLS.StartTLS {
-		t.Error("start_tls should stay nil/off for ldaps://")
+	if cfg.LDAP.TLS.StartTLS == nil || !*cfg.LDAP.TLS.StartTLS {
+		t.Error("tls.start_tls should be true")
+	}
+	if cfg.LDAP.TLS.CertExpiryFailClosed == nil || *cfg.LDAP.TLS.CertExpiryFailClosed {
+		t.Error("tls.cert_expiry_fail_closed should be false")
 	}
 	if cfg.LDAP.SchemaCompat != "389ds" {
 		t.Errorf("schema_compat = %q", cfg.LDAP.SchemaCompat)
+	}
+	if cfg.LDAP.TreeFilter != "(objectClass=inetOrgPerson)" {
+		t.Errorf("tree_filter = %q", cfg.LDAP.TreeFilter)
+	}
+	if cfg.LDAP.PoolSize != 16 {
+		t.Errorf("pool_size = %d", cfg.LDAP.PoolSize)
+	}
+	if !cfg.LDAP.PasswordPlainOverride {
+		t.Error("password_plain_override should be true")
+	}
+	if cfg.LDAP.PasswordScheme != "SSHA512" {
+		t.Errorf("password_scheme = %q", cfg.LDAP.PasswordScheme)
 	}
 	if cfg.Session.TimeoutMinutes != 45 || cfg.Session.AbsoluteTimeoutMinutes != 720 {
 		t.Errorf("session timeouts = %d/%d", cfg.Session.TimeoutMinutes, cfg.Session.AbsoluteTimeoutMinutes)
 	}
 	if cfg.Session.ExpiredAction != ExpiredActionRedirectLogin {
 		t.Errorf("expired_action = %q", cfg.Session.ExpiredAction)
+	}
+	if cfg.Session.DBPath != "/tmp/ldapact-sessions.db" {
+		t.Errorf("db_path = %q", cfg.Session.DBPath)
 	}
 	if cfg.LogLevel != "debug" {
 		t.Errorf("log_level = %q", cfg.LogLevel)
@@ -122,192 +167,202 @@ templates_dir: "/etc/ldapact/templates"
 	}
 }
 
-func TestLoadEnvOverridesYAML(t *testing.T) {
-	t.Setenv(ListenEnv, "0.0.0.0:9090")
-	t.Setenv(URLEnv, "ldaps://env.example.com:636")
-	t.Setenv(BaseDNEnv, "dc=env,dc=com")
-	t.Setenv(BindDNEnv, "cn=envadmin,dc=env,dc=com")
-
-	cfg, err := Load(writeTemp(t, "config.yaml", validMinimal))
+func TestLoadShippedEnvNames(t *testing.T) {
+	// R6 regression: the four env names shipped before this migration are
+	// unchanged.
+	setEnv(t, map[string]string{
+		ListenEnv: "127.0.0.1:9999",
+		URLEnv:    "ldap://127.0.0.1:389",
+		BaseDNEnv: "dc=shipped,dc=com",
+		BindDNEnv: "cn=admin,dc=shipped,dc=com",
+	})
+	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.Server.Listen != "0.0.0.0:9090" {
-		t.Errorf("listen = %q, want env override", cfg.Server.Listen)
-	}
-	if cfg.LDAP.URL != "ldaps://env.example.com:636" {
-		t.Errorf("url = %q, want env override", cfg.LDAP.URL)
-	}
-	if cfg.LDAP.BaseDN != "dc=env,dc=com" {
-		t.Errorf("base_dn = %q, want env override", cfg.LDAP.BaseDN)
-	}
-	if cfg.LDAP.BindDN != "cn=envadmin,dc=env,dc=com" {
-		t.Errorf("bind_dn = %q, want env override", cfg.LDAP.BindDN)
-	}
-}
-
-func TestLoadEnvProvidesMissingFields(t *testing.T) {
-	t.Setenv(ListenEnv, "127.0.0.1:9191")
-	t.Setenv(URLEnv, "ldap://127.0.0.1:389")
-	t.Setenv(BaseDNEnv, "dc=env,dc=com")
-	t.Setenv(BindDNEnv, "cn=admin,dc=env,dc=com")
-
-	cfg, err := Load(writeTemp(t, "config.yaml", "server: {}\nldap: {}\n"))
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if cfg.Server.Listen != "127.0.0.1:9191" {
+	if cfg.Server.Listen != "127.0.0.1:9999" {
 		t.Errorf("listen = %q", cfg.Server.Listen)
 	}
-	if cfg.LDAP.BaseDN != "dc=env,dc=com" {
+	if cfg.LDAP.URL != "ldap://127.0.0.1:389" {
+		t.Errorf("url = %q", cfg.LDAP.URL)
+	}
+	if cfg.LDAP.BaseDN != "dc=shipped,dc=com" {
 		t.Errorf("base_dn = %q", cfg.LDAP.BaseDN)
+	}
+	if cfg.LDAP.BindDN != "cn=admin,dc=shipped,dc=com" {
+		t.Errorf("bind_dn = %q", cfg.LDAP.BindDN)
 	}
 }
 
-func TestLoadEmptyEnvDoesNotOverride(t *testing.T) {
-	t.Setenv(ListenEnv, "")
-	t.Setenv(URLEnv, "")
-	t.Setenv(BaseDNEnv, "")
-	t.Setenv(BindDNEnv, "")
-
-	cfg, err := Load(writeTemp(t, "config.yaml", validMinimal))
+func TestLoadEmptyEnvIgnored(t *testing.T) {
+	setEnv(t, map[string]string{
+		URLEnv:                           "ldap://127.0.0.1:389",
+		BaseDNEnv:                        "dc=example,dc=com",
+		BindDNEnv:                        "cn=admin,dc=example,dc=com",
+		ListenEnv:                        "",
+		AutoNumberDNEnv:                  "",
+		TLSMinVersionEnv:                 "",
+		TLSVerifyEnv:                     "",
+		TLSStartTLSEnv:                   "",
+		TLSCertExpiryFailClosedEnv:       "",
+		SchemaCompatEnv:                  "",
+		TreeFilterEnv:                    "",
+		PoolSizeEnv:                      "",
+		PasswordPlainOverrideEnv:         "",
+		PasswordSchemeEnv:                "",
+		SessionTimeoutMinutesEnv:         "",
+		SessionAbsoluteTimeoutMinutesEnv: "",
+		SessionExpiredActionEnv:          "",
+		SessionDBPathEnv:                 "",
+		LogLevelEnv:                      "",
+		TemplatesDirEnv:                  "",
+	})
+	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	if cfg.Server.Listen != DefaultListen {
 		t.Errorf("listen = %q, want default", cfg.Server.Listen)
 	}
-	if cfg.LDAP.URL != "ldap://127.0.0.1:389" {
-		t.Errorf("url = %q, want YAML value", cfg.LDAP.URL)
+	if cfg.LDAP.AutoNumberDN != "" {
+		t.Errorf("auto_number_dn = %q, want empty", cfg.LDAP.AutoNumberDN)
 	}
-	if cfg.LDAP.BaseDN != "dc=example,dc=com" {
-		t.Errorf("base_dn = %q, want YAML value", cfg.LDAP.BaseDN)
+	if cfg.LDAP.TLS.MinVersion != DefaultTLSMinVersion {
+		t.Errorf("tls.min_version = %q, want default", cfg.LDAP.TLS.MinVersion)
 	}
-	if cfg.LDAP.BindDN != "cn=admin,dc=example,dc=com" {
-		t.Errorf("bind_dn = %q, want YAML value", cfg.LDAP.BindDN)
+	if cfg.LDAP.TLS.Verify == nil || !*cfg.LDAP.TLS.Verify {
+		t.Error("tls.verify should default to true")
+	}
+	if cfg.LDAP.TLS.StartTLS == nil || !*cfg.LDAP.TLS.StartTLS {
+		t.Error("tls.start_tls should default to true")
+	}
+	if cfg.LDAP.TLS.CertExpiryFailClosed == nil || !*cfg.LDAP.TLS.CertExpiryFailClosed {
+		t.Error("tls.cert_expiry_fail_closed should default to true")
+	}
+	if cfg.LDAP.SchemaCompat != DefaultSchemaCompat {
+		t.Errorf("schema_compat = %q, want default", cfg.LDAP.SchemaCompat)
+	}
+	if cfg.LDAP.TreeFilter != DefaultTreeFilter {
+		t.Errorf("tree_filter = %q, want default", cfg.LDAP.TreeFilter)
+	}
+	if cfg.LDAP.PoolSize != DefaultPoolSize {
+		t.Errorf("pool_size = %d, want default", cfg.LDAP.PoolSize)
+	}
+	if cfg.LDAP.PasswordPlainOverride {
+		t.Error("password_plain_override should default to false")
+	}
+	if cfg.LDAP.PasswordScheme != "" {
+		t.Errorf("password_scheme = %q, want empty", cfg.LDAP.PasswordScheme)
+	}
+	if cfg.Session.TimeoutMinutes != DefaultIdleTimeoutMinutes {
+		t.Errorf("session.timeout_minutes = %d, want default", cfg.Session.TimeoutMinutes)
+	}
+	if cfg.Session.AbsoluteTimeoutMinutes != DefaultAbsoluteTimeoutHours*60 {
+		t.Errorf("session.absolute_timeout_minutes = %d, want default", cfg.Session.AbsoluteTimeoutMinutes)
+	}
+	if cfg.Session.ExpiredAction != ExpiredActionRetryBind {
+		t.Errorf("session.expired_action = %q, want default", cfg.Session.ExpiredAction)
+	}
+	if cfg.Session.DBPath != DefaultSessionDBPath {
+		t.Errorf("session.db_path = %q, want default", cfg.Session.DBPath)
+	}
+	if cfg.LogLevel != DefaultLogLevel {
+		t.Errorf("log_level = %q, want default", cfg.LogLevel)
+	}
+	if cfg.TemplatesDir != "" {
+		t.Errorf("templates_dir = %q, want empty", cfg.TemplatesDir)
 	}
 }
 
-func TestLoadEnvValueValidated(t *testing.T) {
-	t.Setenv(URLEnv, "http://env.example.com:389")
-	t.Setenv(BaseDNEnv, "dc=env,dc=com")
-	t.Setenv(BindDNEnv, "cn=admin,dc=env,dc=com")
-
-	_, err := Load(writeTemp(t, "config.yaml", validMinimal))
-	if err == nil || !strings.Contains(err.Error(), "ldap.url") {
-		t.Fatalf("want env url validation error, got %v", err)
+func TestEnvPtrsStayNilWhenUnset(t *testing.T) {
+	// envconfig leaves absent bool pointers untouched; Validate fills the
+	// true defaults afterward.
+	setEnv(t, minimalEnv())
+	var env envFields
+	if err := envconfig.Process("", &env); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	if env.TLSVerify != nil || env.TLSStartTLS != nil || env.TLSCertExpiryFailClosed != nil {
+		t.Error("unset bool pointers should stay nil before Validate")
+	}
+	cfg := env.toConfig()
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if cfg.LDAP.TLS.Verify == nil || !*cfg.LDAP.TLS.Verify {
+		t.Error("tls.verify should default to true")
+	}
+	if cfg.LDAP.TLS.StartTLS == nil || !*cfg.LDAP.TLS.StartTLS {
+		t.Error("tls.start_tls should default to true")
+	}
+	if cfg.LDAP.TLS.CertExpiryFailClosed == nil || !*cfg.LDAP.TLS.CertExpiryFailClosed {
+		t.Error("tls.cert_expiry_fail_closed should default to true")
 	}
 }
 
-func TestLoadUnknownField(t *testing.T) {
-	path := writeTemp(t, "config.yaml", validMinimal+`
-unknown_key: true
-`)
-	_, err := Load(path)
-	if err == nil || !strings.Contains(err.Error(), "unknown") {
-		t.Fatalf("want unknown-field error, got %v", err)
+func TestValidateStartTLSExplicitFalse(t *testing.T) {
+	setEnv(t, map[string]string{
+		URLEnv:         "ldap://127.0.0.1:389",
+		BaseDNEnv:      "dc=example,dc=com",
+		BindDNEnv:      "cn=admin,dc=example,dc=com",
+		TLSStartTLSEnv: "false",
+	})
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.LDAP.TLS.StartTLS == nil || *cfg.LDAP.TLS.StartTLS {
+		t.Error("start_tls should remain explicitly false (plaintext dev mode)")
 	}
 }
 
-func TestLoadInvalidYAML(t *testing.T) {
-	path := writeTemp(t, "config.yaml", "ldap: [unclosed")
-	if _, err := Load(path); err == nil {
-		t.Fatal("want parse error")
-	}
-}
-
-func TestLoadMissingFile(t *testing.T) {
-	if _, err := Load(filepath.Join(t.TempDir(), "nope.yaml")); err == nil {
-		t.Fatal("want error for missing file")
-	}
-}
-
-func TestValidateErrors(t *testing.T) {
+func TestLoadParseErrors(t *testing.T) {
 	cases := []struct {
-		name string
-		yaml string
-		want string
+		name  string
+		env   string
+		value string
+		want  string
 	}{
-		{"bad url scheme", `
-ldap:
-  url: "http://127.0.0.1:389"
-  base_dn: "dc=example,dc=com"
-  bind_dn: "cn=admin,dc=example,dc=com"
-`, "ldap.url"},
-		{"bad url host", `
-ldap:
-  url: "ldap://"
-  base_dn: "dc=example,dc=com"
-  bind_dn: "cn=admin,dc=example,dc=com"
-`, "ldap.url"},
-		{"missing base dn", `
-ldap:
-  url: "ldap://127.0.0.1:389"
-  bind_dn: "cn=admin,dc=example,dc=com"
-`, "base_dn"},
-		{"missing bind dn", `
-ldap:
-  url: "ldap://127.0.0.1:389"
-  base_dn: "dc=example,dc=com"
-`, "bind_dn"},
-		{"min version too low", `
-ldap:
-  url: "ldap://127.0.0.1:389"
-  base_dn: "dc=example,dc=com"
-  bind_dn: "cn=admin,dc=example,dc=com"
-  tls:
-    min_version: "TLSv1.1"
-`, "min_version"},
-		{"verify off rejected", `
-ldap:
-  url: "ldap://127.0.0.1:389"
-  base_dn: "dc=example,dc=com"
-  bind_dn: "cn=admin,dc=example,dc=com"
-  tls:
-    verify: false
-`, "verify"},
-		{"ldaps plus starttls", `
-ldap:
-  url: "ldaps://127.0.0.1:636"
-  base_dn: "dc=example,dc=com"
-  bind_dn: "cn=admin,dc=example,dc=com"
-  tls:
-    start_tls: true
-`, "start_tls"},
-		{"pool size invalid", `
-ldap:
-  url: "ldap://127.0.0.1:389"
-  base_dn: "dc=example,dc=com"
-  bind_dn: "cn=admin,dc=example,dc=com"
-  pool_size: 500
-`, "pool_size"},
-		{"log level invalid", validMinimal + `
-log_level: "loud"
-`, "log_level"},
-		{"idle timeout too small", validMinimal + `
-session:
-  timeout_minutes: 1
-`, "timeout_minutes"},
-		{"absolute timeout too large", validMinimal + `
-session:
-  absolute_timeout_minutes: 9999
-`, "absolute_timeout_minutes"},
-		{"expired action invalid", validMinimal + `
-session:
-  expired_action: "explode"
-`, "expired_action"},
-		{"password scheme invalid", `
-ldap:
-  url: "ldap://127.0.0.1:389"
-  base_dn: "dc=example,dc=com"
-  bind_dn: "cn=admin,dc=example,dc=com"
-  password_scheme: "ROT13"
-`, "password_scheme"},
+		{"pool size", PoolSizeEnv, "abc", "LDAPADM_POOL_SIZE"},
+		{"start tls", TLSStartTLSEnv, "maybe", "LDAPADM_START_TLS"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			path := writeTemp(t, "config.yaml", tc.yaml)
-			_, err := Load(path)
+			setEnv(t, minimalEnv())
+			t.Setenv(tc.env, tc.value)
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want parse error naming %s, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestLoadValidationErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		set  map[string]string
+		want string
+	}{
+		{"bad url scheme", map[string]string{URLEnv: "http://127.0.0.1:389"}, "ldap.url"},
+		{"bad url host", map[string]string{URLEnv: "ldap://"}, "ldap.url"},
+		{"missing base dn", map[string]string{BaseDNEnv: ""}, "base_dn"},
+		{"missing bind dn", map[string]string{BindDNEnv: ""}, "bind_dn"},
+		{"min version too low", map[string]string{TLSMinVersionEnv: "TLSv1.1"}, "min_version"},
+		{"verify off rejected", map[string]string{TLSVerifyEnv: "false"}, "verify"},
+		{"ldaps plus starttls", map[string]string{URLEnv: "ldaps://127.0.0.1:636", TLSStartTLSEnv: "true"}, "start_tls"},
+		{"pool size invalid", map[string]string{PoolSizeEnv: "500"}, "pool_size"},
+		{"log level invalid", map[string]string{LogLevelEnv: "loud"}, "log_level"},
+		{"idle timeout too small", map[string]string{SessionTimeoutMinutesEnv: "1"}, "timeout_minutes"},
+		{"absolute timeout too large", map[string]string{SessionAbsoluteTimeoutMinutesEnv: "9999"}, "absolute_timeout_minutes"},
+		{"expired action invalid", map[string]string{SessionExpiredActionEnv: "explode"}, "expired_action"},
+		{"password scheme invalid", map[string]string{PasswordSchemeEnv: "ROT13"}, "password_scheme"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setEnv(t, minimalEnv())
+			setEnv(t, tc.set)
+			_, err := Load()
 			if err == nil {
 				t.Fatal("want error")
 			}
@@ -318,15 +373,99 @@ ldap:
 	}
 }
 
+func TestLoadUnknownEnvVar(t *testing.T) {
+	setEnv(t, minimalEnv())
+	t.Setenv("LDAPADM_LITSEN", "1")
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "LDAPADM_LITSEN") {
+		t.Fatalf("want unknown-var error naming LDAPADM_LITSEN, got %v", err)
+	}
+}
+
+func TestLoadUnknownEmptyEnvVarRejected(t *testing.T) {
+	// Strictness applies even to set-but-empty unknown vars.
+	setEnv(t, minimalEnv())
+	t.Setenv("LDAPADM_LITSEN", "")
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "LDAPADM_LITSEN") {
+		t.Fatalf("want unknown-var error for empty value, got %v", err)
+	}
+}
+
+func TestLoadUnprefixedVarsIgnored(t *testing.T) {
+	// A stray unprefixed URL/VERIFY must never be read (full-name-tag guard).
+	setEnv(t, map[string]string{
+		URLEnv:    "ldap://127.0.0.1:389",
+		BaseDNEnv: "dc=example,dc=com",
+		BindDNEnv: "cn=admin,dc=example,dc=com",
+		"URL":     "ldaps://wrong.example.com:636",
+		"VERIFY":  "false",
+	})
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.LDAP.URL != "ldap://127.0.0.1:389" {
+		t.Errorf("url = %q, want the LDAPADM_ value", cfg.LDAP.URL)
+	}
+	if cfg.LDAP.TLS.Verify == nil || !*cfg.LDAP.TLS.Verify {
+		t.Error("verify should default to true; unprefixed VERIFY ignored")
+	}
+}
+
+func TestLoadIgnoresSecretVars(t *testing.T) {
+	// R3: secrets are never parsed by envconfig; the resolver chain fills
+	// them later. Load must succeed with the secret vars present and leave
+	// the runtime fields empty.
+	setEnv(t, map[string]string{
+		URLEnv:                "ldap://127.0.0.1:389",
+		BaseDNEnv:             "dc=example,dc=com",
+		BindDNEnv:             "cn=admin,dc=example,dc=com",
+		BindPasswordEnv:       "s3cr3t",
+		AutoNumberPasswordEnv: "auto-s3cr3t",
+	})
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.BindPassword != "" {
+		t.Errorf("bind password parsed by envconfig: %q", cfg.BindPassword)
+	}
+	if cfg.AutoNumberPassword != "" {
+		t.Errorf("auto-number password parsed by envconfig: %q", cfg.AutoNumberPassword)
+	}
+}
+
+func TestKnownEnvNamesComplete(t *testing.T) {
+	// The strict allowlist must cover exactly the parsed config fields plus
+	// the secret variables and their _FILE references -- no more, no less.
+	want := map[string]struct{}{
+		ListenEnv: {}, URLEnv: {}, BaseDNEnv: {}, BindDNEnv: {}, AutoNumberDNEnv: {},
+		TLSMinVersionEnv: {}, TLSVerifyEnv: {}, TLSStartTLSEnv: {}, TLSCertExpiryFailClosedEnv: {},
+		SchemaCompatEnv: {}, TreeFilterEnv: {}, PoolSizeEnv: {},
+		PasswordPlainOverrideEnv: {}, PasswordSchemeEnv: {},
+		SessionTimeoutMinutesEnv: {}, SessionAbsoluteTimeoutMinutesEnv: {},
+		SessionExpiredActionEnv: {}, SessionDBPathEnv: {},
+		LogLevelEnv: {}, TemplatesDirEnv: {},
+		BindPasswordEnv: {}, BindPasswordEnv + "_FILE": {},
+		AutoNumberPasswordEnv: {}, AutoNumberPasswordEnv + "_FILE": {},
+	}
+	for name := range want {
+		if _, ok := knownEnvNames[name]; !ok {
+			t.Errorf("allowlist missing %s", name)
+		}
+	}
+	for name := range knownEnvNames {
+		if _, ok := want[name]; !ok {
+			t.Errorf("allowlist contains unexpected %s", name)
+		}
+	}
+}
+
 func TestPasswordSchemeNormalized(t *testing.T) {
-	path := writeTemp(t, "config.yaml", `
-ldap:
-  url: "ldap://127.0.0.1:389"
-  base_dn: "dc=example,dc=com"
-  bind_dn: "cn=admin,dc=example,dc=com"
-  password_scheme: "ssha"
-`)
-	cfg, err := Load(path)
+	setEnv(t, minimalEnv())
+	t.Setenv(PasswordSchemeEnv, "ssha")
+	cfg, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,21 +474,46 @@ ldap:
 	}
 }
 
-func TestValidateStartTLSExplicitFalse(t *testing.T) {
-	path := writeTemp(t, "config.yaml", `
-ldap:
-  url: "ldap://127.0.0.1:389"
-  base_dn: "dc=example,dc=com"
-  bind_dn: "cn=admin,dc=example,dc=com"
-  tls:
-    start_tls: false
-`)
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
+func TestEnvTagsMatchConstants(t *testing.T) {
+	want := map[string]string{
+		"Listen":                        ListenEnv,
+		"URL":                           URLEnv,
+		"BaseDN":                        BaseDNEnv,
+		"BindDN":                        BindDNEnv,
+		"AutoNumberDN":                  AutoNumberDNEnv,
+		"LogLevel":                      LogLevelEnv,
+		"TemplatesDir":                  TemplatesDirEnv,
+		"TLSMinVersion":                 TLSMinVersionEnv,
+		"TLSVerify":                     TLSVerifyEnv,
+		"TLSStartTLS":                   TLSStartTLSEnv,
+		"TLSCertExpiryFailClosed":       TLSCertExpiryFailClosedEnv,
+		"SchemaCompat":                  SchemaCompatEnv,
+		"TreeFilter":                    TreeFilterEnv,
+		"PoolSize":                      PoolSizeEnv,
+		"PasswordPlainOverride":         PasswordPlainOverrideEnv,
+		"PasswordScheme":                PasswordSchemeEnv,
+		"SessionTimeoutMinutes":         SessionTimeoutMinutesEnv,
+		"SessionAbsoluteTimeoutMinutes": SessionAbsoluteTimeoutMinutesEnv,
+		"SessionExpiredAction":          SessionExpiredActionEnv,
+		"SessionDBPath":                 SessionDBPathEnv,
 	}
-	if cfg.LDAP.TLS.StartTLS == nil || *cfg.LDAP.TLS.StartTLS {
-		t.Error("start_tls should remain explicitly false (plaintext dev mode)")
+	typ := reflect.TypeOf(envFields{})
+	for field, env := range want {
+		sf, ok := typ.FieldByName(field)
+		if !ok {
+			t.Errorf("envFields has no field %s", field)
+			continue
+		}
+		got := sf.Tag.Get("envconfig")
+		if got != env {
+			t.Errorf("%s tag = %q, want %q", field, got, env)
+		}
+	}
+}
+
+func TestLogLevelEnvMatchesLogging(t *testing.T) {
+	if LogLevelEnv != logging.LevelEnv {
+		t.Fatalf("config.LogLevelEnv = %q, logging.LevelEnv = %q", LogLevelEnv, logging.LevelEnv)
 	}
 }
 
@@ -531,15 +695,6 @@ func TestResolveSecretsBindMissing(t *testing.T) {
 	if err := cfg.ResolveSecrets(); err == nil {
 		t.Fatal("want bind-secret resolution failure")
 	}
-}
-
-func writeTemp(t *testing.T, name, content string) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), name)
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return path
 }
 
 type fakeTTY struct {
