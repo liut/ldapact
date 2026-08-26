@@ -127,8 +127,15 @@ make lint             # gofmt + go vet + staticcheck + govulncheck
 make run              # local dev (export the required env vars; see Configuration)
 ```
 
-`.env.example` holds a starter set of variables; load it with
-`set -a; source .env.example; set +a`, then override the secrets.
+`.env.example` holds a starter set of variables. Copy it to your own file
+before using it — never edit or source the example directly:
+
+```sh
+cp .env.example .env
+set -a; source .env; set +a
+```
+
+Then override the secrets in `.env`.
 
 ### Integration-test LDAP backends
 
