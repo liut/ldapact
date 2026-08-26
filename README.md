@@ -30,8 +30,11 @@ static, embeddable binary (R17).
 
 ```sh
 make build
+export LDAPADM_URL='ldap://127.0.0.1:389'
+export LDAPADM_BASE_DN='dc=example,dc=com'
+export LDAPADM_BIND_DN='cn=admin,dc=example,dc=com'
 export LDAPADM_BIND_PASSWORD='your-secret'      # or LDAPADM_BIND_PASSWORD_FILE=/path/to/0600-file
-./bin/ldapact -config config/example.yaml
+./bin/ldapact
 open http://127.0.0.1:8080
 ```
 
@@ -40,47 +43,39 @@ health probes.
 
 ## Configuration
 
-The server profile is a strict YAML file (unknown keys fail the parse):
+The server profile is configured entirely by `LDAPADM_*` environment
+variables parsed by
+[kelseyhightower/envconfig](https://github.com/kelseyhightower/envconfig);
+there is no config file. Unknown `LDAPADM_*` variables fail startup (typo
+guard), and set-but-empty variables are treated as unset, so an empty value
+never overrides a default. Code defaults apply when a variable is absent.
 
-```yaml
-server:
-  listen: "127.0.0.1:8080"
-ldap:
-  url: "ldap://127.0.0.1:389"       # or ldaps://host:636
-  base_dn: "dc=example,dc=com"
-  bind_dn: "cn=admin,dc=example,dc=com"
-  tls:
-    min_version: "TLSv1.2"           # TLSv1.2 | TLSv1.3 (floor enforced)
-    verify: true                     # false is rejected at parse time
-    start_tls: true                  # ldap:// + StartTLS (failures are fatal)
-    cert_expiry_fail_closed: true    # refuse to start on expired certs
-  schema_compat: "openldap"
-  tree_filter: "(objectClass=*)"
-  pool_size: 8
-  password_plain_override: false     # {PLAIN} writes emit a warn when enabled
-  password_scheme: "SSHA512"         # RFC 2307 write scheme (SSHA for legacy dirs)
-session:
-  timeout_minutes: 30                # idle, 5..240
-  absolute_timeout_minutes: 480      # absolute, 30..1440
-  expired_action: "retry_bind"       # retry_bind | redirect_to_login
-  db_path: "/var/lib/ldapact/sessions.db"
-log_level: "info"                    # debug|info|warn|error (LDAPADM_LOG_LEVEL overrides)
-templates_dir: ""                    # optional custom XML template directory
-```
+| env var | config key | default | notes |
+|---|---|---|---|
+| `LDAPADM_LISTEN` | `server.listen` | `127.0.0.1:8080` | |
+| `LDAPADM_URL` | `ldap.url` | — (required) | `ldap://host:port` or `ldaps://host:port` |
+| `LDAPADM_BASE_DN` | `ldap.base_dn` | — (required) | |
+| `LDAPADM_BIND_DN` | `ldap.bind_dn` | — (required) | |
+| `LDAPADM_AUTO_NUMBER_DN` | `ldap.auto_number_dn` | empty | enables auto-numbering; also resolves `LDAPADM_AUTO_NUMBER_PASSWORD` |
+| `LDAPADM_MIN_VERSION` | `ldap.tls.min_version` | `TLSv1.2` | `TLSv1.2` \| `TLSv1.3` (floor enforced) |
+| `LDAPADM_VERIFY` | `ldap.tls.verify` | `true` | `false` is rejected at startup |
+| `LDAPADM_START_TLS` | `ldap.tls.start_tls` | `true` for `ldap://` | failures are fatal; must be off with `ldaps://` |
+| `LDAPADM_CERT_EXPIRY_FAIL_CLOSED` | `ldap.tls.cert_expiry_fail_closed` | `true` | refuse to start on expired certs |
+| `LDAPADM_SCHEMA_COMPAT` | `ldap.schema_compat` | `openldap` | |
+| `LDAPADM_TREE_FILTER` | `ldap.tree_filter` | `(objectClass=*)` | |
+| `LDAPADM_POOL_SIZE` | `ldap.pool_size` | `8` | 1..100 |
+| `LDAPADM_PASSWORD_PLAIN_OVERRIDE` | `ldap.password_plain_override` | `false` | `{PLAIN}` writes emit a warn when enabled |
+| `LDAPADM_PASSWORD_SCHEME` | `ldap.password_scheme` | empty | RFC 2307 write scheme (engine default SSHA512; `SSHA` for legacy dirs) |
+| `LDAPADM_TIMEOUT_MINUTES` | `session.timeout_minutes` | `30` | idle, 5..240 |
+| `LDAPADM_ABSOLUTE_TIMEOUT_MINUTES` | `session.absolute_timeout_minutes` | `480` | absolute, 30..1440 |
+| `LDAPADM_EXPIRED_ACTION` | `session.expired_action` | `retry_bind` | `retry_bind` \| `redirect_to_login` |
+| `LDAPADM_DB_PATH` | `session.db_path` | `/var/lib/ldapact/sessions.db` | |
+| `LDAPADM_LOG_LEVEL` | `log_level` | `info` | `debug`\|`info`\|`warn`\|`error` |
+| `LDAPADM_TEMPLATES_DIR` | `templates_dir` | empty | optional custom XML template directory |
 
-The four runtime profile fields can also be supplied or overridden by
-environment variables (env wins over YAML; an unset or empty variable is
-ignored):
-
-| config key     | env var             |
-|----------------|---------------------|
-| `server.listen` | `LDAPADM_LISTEN`    |
-| `ldap.url`     | `LDAPADM_URL`       |
-| `ldap.base_dn` | `LDAPADM_BASE_DN`   |
-| `ldap.bind_dn` | `LDAPADM_BIND_DN`   |
-
-**Secrets are never stored in the YAML.** The bind password (and the optional
-`auto_number` password) resolve through the chain:
+**Secrets are never parsed from the environment or stored in any config
+file.** The bind password (and the optional `auto_number` password) resolve
+through the chain:
 
 1. env var `LDAPADM_BIND_PASSWORD` (or `LDAPADM_AUTO_NUMBER_PASSWORD`)
 2. file referenced by `LDAPADM_BIND_PASSWORD_FILE` — mode must be `0600`
@@ -91,11 +86,14 @@ ignored):
 ldapact is designed for loopback, internal-VPN, or mTLS-fronted deployments
 (single admin bind + server-side sessions; no public multi-tenant exposure).
 
-- **Bare metal/systemd**: `deploy/systemd/ldapact.service` (uses
-  `LoadCredential` for secret files).
+- **Bare metal/systemd**: `deploy/systemd/ldapact.service` reads non-secret
+  config from `/etc/default/ldapact` (`EnvironmentFile`; see
+  `deploy/systemd/ldapact.default.example`) and uses `LoadCredential` for
+  secret files.
 - **Kubernetes**: `deploy/k8s/deployment.yaml` (ConfigMap + Secret + probes).
 - **Container**: `Dockerfile` produces a distroless static image; run with
-  `-config /etc/ldapact/ldapact.yaml` and `LDAPADM_BIND_PASSWORD_FILE`.
+  only environment variables and `LDAPADM_BIND_PASSWORD_FILE` (no mounted
+  config file).
 
 See [OPERATIONS.md](OPERATIONS.md) for the runbook: secret resolver examples,
 sessions.db lifecycle, log shipping, TLS rotation, cutover playbook, and the
@@ -126,8 +124,11 @@ make test             # unit tests + integration tests (backend auto-detected)
 make test-js          # JS unit tests (Node)
 make test-integration # end-to-end F1-F8 vs the detected backend
 make lint             # gofmt + go vet + staticcheck + govulncheck
-make run              # local dev with config/example.yaml
+make run              # local dev (export the required env vars; see Configuration)
 ```
+
+`.env.example` holds a starter set of variables; load it with
+`set -a; source .env.example; set +a`, then override the secrets.
 
 ### Integration-test LDAP backends
 
@@ -143,6 +144,8 @@ order and never touches a real LDAP service:
    System configs, data directories, pidfiles, and launchd/systemd services
    are never read or modified.
 
+The `LDAPADM_TEST_*` variables are test-harness only: the production binary
+rejects them (strict allowlist), so unset them before starting the server.
 When no backend exists, integration tests skip. The harness probes whether the
 server verifies `{SSHA512}` binds and downgrades the write scheme to `{SSHA}`
 for directory builds that lack SHA-2 password support (e.g. the MacPorts

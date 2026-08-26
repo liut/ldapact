@@ -3,7 +3,7 @@
 ## Secrets
 
 The resolver chain (env → 0600 file → TTY) applies to `LDAPADM_BIND_PASSWORD`
-and `LDAPADM_AUTO_NUMBER_PASSWORD`. No secret ever appears in YAML, in
+and `LDAPADM_AUTO_NUMBER_PASSWORD`. No secret ever appears in config files, in
 `/proc/PID/environ`, or in logs (truncated fingerprints only).
 
 Examples:
@@ -16,10 +16,22 @@ Examples:
 Rotate by replacing the file/env value and restarting. Startup fails fast when
 the secret is missing or the file mode is wrong.
 
+### Moving from YAML to env
+
+This release replaced the YAML profile and the `-config` flag with `LDAPADM_*`
+environment variables (see the reference table in README). If you scripted
+startup with `-config /path/ldapact.yaml`, export the same values as env vars
+instead and drop the flag; the required variables are `LDAPADM_URL`,
+`LDAPADM_BASE_DN`, and `LDAPADM_BIND_DN`, with secrets injected exactly as
+before (`LoadCredential`/mounted Secret + `LDAPADM_BIND_PASSWORD_FILE`).
+Under systemd, edit `/etc/default/ldapact` (see
+`deploy/systemd/ldapact.default.example`) — the unit file only references it via
+`EnvironmentFile`, so configuration changes never require editing the unit.
+
 ## Sessions database
 
-`session.db_path` (default `/var/lib/ldapact/sessions.db`, mode 0600) holds the
-bbolt session store. Lifecycle:
+`LDAPADM_DB_PATH` (default `/var/lib/ldapact/sessions.db`, mode 0600) holds
+the bbolt session store. Lifecycle:
 
 - **Backup**: stop the service, `cp sessions.db sessions.db.bak-$(date +%F)`,
   restart. (bbolt writes are atomic, but copy the file offline for a clean
@@ -40,15 +52,15 @@ Logs are JSON on stdout. Every mutation emits one line:
 
 `userPassword` values are dropped at the logger boundary — grep your log
 shipper for `userPassword` periodically as a regression check. Level is
-controlled by `log_level` or `LDAPADM_LOG_LEVEL` (`error` silences audit lines
-for storage-constrained deployments, but note the audit-loss tradeoff).
+controlled by `LDAPADM_LOG_LEVEL` (`error` silences audit lines for
+storage-constrained deployments, but note the audit-loss tradeoff).
 
 ## TLS certificate rotation (LDAP)
 
-`tls.cert_expiry_fail_closed` refuses startup on expired certificates and
-warns at < 30 days (`event=ldap.cert_expiring`). Rotate the directory server
-certificate, then restart ldapact. Hostname verification uses the SAN from the
-`url` host.
+`LDAPADM_CERT_EXPIRY_FAIL_CLOSED` (default `true`) refuses startup on expired
+certificates and warns at < 30 days (`event=ldap.cert_expiring`). Rotate the
+directory server certificate, then restart ldapact. Hostname verification uses
+the SAN from the `LDAPADM_URL` host.
 
 ## Cutover playbook (phpLDAPadmin → ldapact)
 
@@ -87,7 +99,7 @@ it still matches your deployment:
 - No Samba/batch/multi-profile needs in the near term (v2 scope).
 - Custom template inventory is non-empty and covered by the parser corpus
   (plan C3 assumption).
-- `password_plain_override` stays `false`.
+- `LDAPADM_PASSWORD_PLAIN_OVERRIDE` stays `false` (unset).
 - Sessions DB path is writable by the service user and backed up.
 - Log shipper preserves JSON lines; `event=ldap.*` filters wired for audit
   queries.

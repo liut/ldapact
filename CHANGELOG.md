@@ -3,6 +3,24 @@
 All notable changes to ldapact v1 are tracked here, one entry per implementation
 unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
 
+## Env-driven configuration migration (2026-08-26)
+
+- `pkg/config` now loads the full profile from `LDAPADM_*` environment
+  variables via kelseyhightower/envconfig v1.4.0; the YAML config file and the
+  `-config` flag are removed (**breaking** for anything that scripts startup).
+- Flat env naming for every non-secret field (see the README reference
+  table); the four previously shipped names — `LDAPADM_LISTEN`,
+  `LDAPADM_URL`, `LDAPADM_BASE_DN`, `LDAPADM_BIND_DN` — are unchanged.
+- Unknown `LDAPADM_*` variables fail fast at startup (typo guard); set-but-
+  empty variables are treated as unset so defaults still apply.
+- Secrets unchanged: env → 0600 file → TTY resolver; never parsed from the
+  environment and never logged.
+- Docker, k8s, and systemd artifacts plus `make run` are env-driven; systemd
+  reads non-secret config from `/etc/default/ldapact` via
+  `EnvironmentFile`, and the bind Secret / `LoadCredential` mounts plus
+  `LDAPADM_BIND_PASSWORD_FILE` stay.
+- Added `.env.example` with the full variable set for local development.
+
 ## U1 — Project skeleton, config, secret resolver, slog, security headers, CSRF
 
 - Go module `github.com/liut/ldapact` with `cmd/ldapact` single-binary entry

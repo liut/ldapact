@@ -1,7 +1,7 @@
 ---
 title: "refactor: migrate server config from YAML file to envconfig"
 type: refactor
-status: active
+status: completed
 date: 2026-08-26
 ---
 
@@ -104,7 +104,7 @@ The server profile is currently a strict YAML file loaded by `config.Load(path)`
 
 **Goal:** Replace YAML parsing with envconfig; keep the `Config` struct shape, `Validate()`, and `ResolveSecrets()`; preserve all documented semantics.
 
-**Requirements:** R1, R2, R4, R6
+**Requirements:** R1, R2, R3, R4, R6
 
 **Dependencies:** None
 
