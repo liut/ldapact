@@ -3,6 +3,19 @@
 All notable changes to ldapact v1 are tracked here, one entry per implementation
 unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
 
+## Session DB path fallback (2026-08-26)
+
+- When `LDAPADM_DB_PATH` is unset and the default `/var/lib/ldapact`
+  directory does not exist, the session store now falls back to
+  `~/.local/state/ldapact/sessions.db` (XDG-style per-user path) so
+  unprivileged, dev, and container runs need no pre-created system directory.
+  The same fallback applies when the variable is explicitly set to the
+  default value (e.g. sample env files); other explicit paths are unchanged.
+- `session.NewStore` creates the parent directory (mode 0700) only when it is
+  missing; an existing (even unstat-able) directory is never re-created, so
+  deployments with an explicit `LDAPADM_DB_PATH` are unchanged.
+- The resolved path is logged at startup (`db_path`).
+
 ## Env-driven configuration migration (2026-08-26)
 
 - `pkg/config` now loads the full profile from `LDAPADM_*` environment

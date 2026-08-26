@@ -69,7 +69,7 @@ never overrides a default. Code defaults apply when a variable is absent.
 | `LDAPADM_TIMEOUT_MINUTES` | `session.timeout_minutes` | `30` | idle, 5..240 |
 | `LDAPADM_ABSOLUTE_TIMEOUT_MINUTES` | `session.absolute_timeout_minutes` | `480` | absolute, 30..1440 |
 | `LDAPADM_EXPIRED_ACTION` | `session.expired_action` | `retry_bind` | `retry_bind` \| `redirect_to_login` |
-| `LDAPADM_DB_PATH` | `session.db_path` | `/var/lib/ldapact/sessions.db` | |
+| `LDAPADM_DB_PATH` | `session.db_path` | `/var/lib/ldapact/sessions.db` | unset or set to the default: falls back to `~/.local/state/ldapact/sessions.db` when `/var/lib/ldapact` does not exist |
 | `LDAPADM_LOG_LEVEL` | `log_level` | `info` | `debug`\|`info`\|`warn`\|`error` |
 | `LDAPADM_TEMPLATES_DIR` | `templates_dir` | empty | optional custom XML template directory |
 

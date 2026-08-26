@@ -117,6 +117,7 @@ func run(args []string) int {
 		"version", version,
 		"commit", commit,
 		"listen", cfg.Server.Listen,
+		"db_path", cfg.Session.DBPath,
 		"base_dn", cfg.LDAP.BaseDN,
 		"bind_dn", cfg.LDAP.BindDN,
 	)

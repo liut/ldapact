@@ -85,8 +85,8 @@ func TestLoadMinimalEnvDefaults(t *testing.T) {
 	if cfg.Session.ExpiredAction != ExpiredActionRetryBind {
 		t.Errorf("session.expired_action = %q, want %q", cfg.Session.ExpiredAction, ExpiredActionRetryBind)
 	}
-	if cfg.Session.DBPath != DefaultSessionDBPath {
-		t.Errorf("session.db_path = %q, want %q", cfg.Session.DBPath, DefaultSessionDBPath)
+	if cfg.Session.DBPath != resolveSessionDBPath(DefaultSessionDBPath) {
+		t.Errorf("session.db_path = %q, want %q", cfg.Session.DBPath, resolveSessionDBPath(DefaultSessionDBPath))
 	}
 }
 
@@ -263,14 +263,78 @@ func TestLoadEmptyEnvIgnored(t *testing.T) {
 	if cfg.Session.ExpiredAction != ExpiredActionRetryBind {
 		t.Errorf("session.expired_action = %q, want default", cfg.Session.ExpiredAction)
 	}
-	if cfg.Session.DBPath != DefaultSessionDBPath {
-		t.Errorf("session.db_path = %q, want default", cfg.Session.DBPath)
+	if cfg.Session.DBPath != resolveSessionDBPath(DefaultSessionDBPath) {
+		t.Errorf("session.db_path = %q, want default %q", cfg.Session.DBPath, resolveSessionDBPath(DefaultSessionDBPath))
 	}
 	if cfg.LogLevel != DefaultLogLevel {
 		t.Errorf("log_level = %q, want default", cfg.LogLevel)
 	}
 	if cfg.TemplatesDir != "" {
 		t.Errorf("templates_dir = %q, want empty", cfg.TemplatesDir)
+	}
+}
+
+func TestResolveSessionDBPath(t *testing.T) {
+	// Custom paths are always kept as configured.
+	if got := resolveSessionDBPathFor("/srv/ldapact/sessions.db", "/var/lib/ldapact", "/tmp/fallback.db"); got != "/srv/ldapact/sessions.db" {
+		t.Errorf("custom path: got %q, want unchanged", got)
+	}
+	// The classic default wins when the directory exists.
+	existing := t.TempDir()
+	if got := resolveSessionDBPathFor(DefaultSessionDBPath, existing, "/tmp/fallback.db"); got != DefaultSessionDBPath {
+		t.Errorf("existing dir: got %q, want %q", got, DefaultSessionDBPath)
+	}
+	// The classic default switches to the fallback when the directory is
+	// missing — whether the variable was unset or explicitly set to the
+	// default value.
+	missing := filepath.Join(t.TempDir(), "does-not-exist")
+	if got := resolveSessionDBPathFor(DefaultSessionDBPath, missing, "/tmp/fallback.db"); got != "/tmp/fallback.db" {
+		t.Errorf("missing dir: got %q, want fallback", got)
+	}
+}
+
+func TestLoadExplicitDefaultDBPath(t *testing.T) {
+	// An explicitly configured value equal to the built-in default must get
+	// the same fallback treatment as an unset variable.
+	setEnv(t, minimalEnv())
+	t.Setenv(SessionDBPathEnv, DefaultSessionDBPath)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Session.DBPath != resolveSessionDBPath(DefaultSessionDBPath) {
+		t.Errorf("session.db_path = %q, want %q", cfg.Session.DBPath, resolveSessionDBPath(DefaultSessionDBPath))
+	}
+}
+
+func TestDefaultSessionDBPathFallback(t *testing.T) {
+	// The classic /var/lib/ldapact path wins when the directory exists.
+	existing := t.TempDir()
+	if got := defaultSessionDBPathFor(existing, "/tmp/fallback.db"); got != DefaultSessionDBPath {
+		t.Errorf("existing dir: got %q, want %q", got, DefaultSessionDBPath)
+	}
+	// A missing directory (or a non-directory path) selects the fallback.
+	missing := filepath.Join(t.TempDir(), "does-not-exist")
+	if got := defaultSessionDBPathFor(missing, "/tmp/fallback.db"); got != "/tmp/fallback.db" {
+		t.Errorf("missing dir: got %q, want fallback", got)
+	}
+	notADir := filepath.Join(t.TempDir(), "file.db")
+	if err := os.WriteFile(notADir, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := defaultSessionDBPathFor(notADir, "/tmp/fallback.db"); got != "/tmp/fallback.db" {
+		t.Errorf("non-directory path: got %q, want fallback", got)
+	}
+}
+
+func TestFallbackSessionDBPath(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		t.Skipf("no home directory: %v", err)
+	}
+	want := filepath.Join(home, ".local", "state", "ldapact", "sessions.db")
+	if got := FallbackSessionDBPath(); got != want {
+		t.Errorf("FallbackSessionDBPath = %q, want %q", got, want)
 	}
 }
 

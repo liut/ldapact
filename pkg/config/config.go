@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/kelseyhightower/envconfig"
@@ -62,6 +63,50 @@ const (
 	DefaultSessionDBPath        = "/var/lib/ldapact/sessions.db"
 	DefaultTLSMinVersion        = "TLSv1.2"
 )
+
+// FallbackSessionDBPath returns the per-user XDG state path
+// (~/.local/state/ldapact/sessions.db) used when the classic
+// /var/lib/ldapact directory does not exist. If the home directory cannot
+// be determined it returns DefaultSessionDBPath rather than inventing a
+// path.
+func FallbackSessionDBPath() string {
+	home, err := os.UserHomeDir()
+	if err == nil && home != "" {
+		return filepath.Join(home, ".local", "state", "ldapact", "sessions.db")
+	}
+	return DefaultSessionDBPath
+}
+
+// resolveSessionDBPath applies the classic-default fallback to the effective
+// DB path. When the path is the built-in /var/lib/ldapact/sessions.db and
+// that directory does not exist, it switches to the per-user XDG state path.
+// This covers both an unset variable and an explicitly configured value that
+// happens to equal the default (e.g. sample env files), so the "default
+// directory missing" rule is applied consistently. Any other explicitly
+// configured path is left untouched.
+func resolveSessionDBPath(dbPath string) string {
+	return resolveSessionDBPathFor(dbPath, filepath.Dir(DefaultSessionDBPath), FallbackSessionDBPath())
+}
+
+// resolveSessionDBPathFor is the pure decision behind resolveSessionDBPath,
+// split out so tests can exercise both branches without touching the host
+// filesystem.
+func resolveSessionDBPathFor(dbPath, systemDir, fallback string) string {
+	if dbPath == DefaultSessionDBPath {
+		return defaultSessionDBPathFor(systemDir, fallback)
+	}
+	return dbPath
+}
+
+// defaultSessionDBPathFor is the pure existence check behind the classic
+// default resolution, split out so tests can exercise both branches without
+// touching the host filesystem.
+func defaultSessionDBPathFor(systemDir, fallback string) string {
+	if fi, err := os.Stat(systemDir); err == nil && fi.IsDir() {
+		return DefaultSessionDBPath
+	}
+	return fallback
+}
 
 // Session expiry actions (R13).
 const (
@@ -371,5 +416,6 @@ func (c *Config) validateSession() error {
 	if s.DBPath == "" {
 		s.DBPath = DefaultSessionDBPath
 	}
+	s.DBPath = resolveSessionDBPath(s.DBPath)
 	return nil
 }

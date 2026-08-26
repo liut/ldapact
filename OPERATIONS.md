@@ -31,7 +31,11 @@ Under systemd, edit `/etc/default/ldapact` (see
 ## Sessions database
 
 `LDAPADM_DB_PATH` (default `/var/lib/ldapact/sessions.db`, mode 0600) holds
-the bbolt session store. Lifecycle:
+the bbolt session store. When the variable is unset (or explicitly set to the
+default value) and `/var/lib/ldapact` does not exist, the store falls back to
+`~/.local/state/ldapact/sessions.db` (XDG-style per-user path) so
+unprivileged, dev, and container runs need no pre-created system directory;
+the parent directory is created with mode 0700 on first open. Lifecycle:
 
 - **Backup**: stop the service, `cp sessions.db sessions.db.bak-$(date +%F)`,
   restart. (bbolt writes are atomic, but copy the file offline for a clean

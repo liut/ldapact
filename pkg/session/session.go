@@ -51,6 +51,9 @@ type Store struct {
 // creating the sessions bucket. startup fails if an existing file has the
 // wrong mode (KTD 7).
 func NewStore(path string, idleTimeout, absoluteTimeout time.Duration) (*Store, error) {
+	if err := ensureParentDir(path); err != nil {
+		return nil, err
+	}
 	if err := checkFileMode(path); err != nil {
 		return nil, err
 	}
@@ -71,6 +74,31 @@ func NewStore(path string, idleTimeout, absoluteTimeout time.Duration) (*Store, 
 		idle:     idleTimeout,
 		absolute: absoluteTimeout,
 	}, nil
+}
+
+// ensureParentDir creates the database's parent directory only when it is
+// missing. bbolt does not create parents, and the default path may be a
+// per-user XDG state dir that is not pre-created (e.g.
+// ~/.local/state/ldapact on first run). If the directory already exists, or
+// cannot be stat'ed at all, we never attempt to create it: MkdirAll would
+// otherwise report a misleading "mkdir: permission denied" for an
+// existing-but-unstat-able system directory. Such stat errors are left for
+// the open below to report truthfully.
+func ensureParentDir(path string) error {
+	dir := filepath.Dir(path)
+	fi, err := os.Stat(dir)
+	if err == nil {
+		if fi.IsDir() {
+			return nil
+		}
+		return fmt.Errorf("session: %s is not a directory", dir)
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return fmt.Errorf("session: create directory for %s: %w", path, err)
+		}
+	}
+	return nil
 }
 
 func checkFileMode(path string) error {

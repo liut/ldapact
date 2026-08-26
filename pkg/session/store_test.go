@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -169,6 +170,41 @@ func TestFileModeEnforced(t *testing.T) {
 	}
 	if _, err := NewStore(path, time.Minute, time.Hour); err == nil {
 		t.Fatal("want error for 0644 db file")
+	}
+}
+
+func TestNewStoreCreatesParentDir(t *testing.T) {
+	// The default path can point at a per-user XDG state dir that does not
+	// exist yet; NewStore must create it (0700) rather than fail.
+	dir := filepath.Join(t.TempDir(), "nested", "state")
+	path := filepath.Join(dir, "sessions.db")
+	s, err := NewStore(path, time.Minute, time.Hour)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer s.Close()
+	fi, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("parent directory not created: %v", err)
+	}
+	if !fi.IsDir() {
+		t.Error("parent is not a directory")
+	}
+	if got := fi.Mode().Perm(); got != 0o700 {
+		t.Errorf("parent mode = %o, want 700", got)
+	}
+}
+
+func TestNewStoreParentNotDirectory(t *testing.T) {
+	// A file where the parent directory should be must never be created
+	// over; it is reported as an error instead.
+	parent := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(parent, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewStore(filepath.Join(parent, "sessions.db"), time.Minute, time.Hour)
+	if err == nil || !strings.Contains(err.Error(), "not a directory") {
+		t.Fatalf("want not-a-directory error, got %v", err)
 	}
 }
 
