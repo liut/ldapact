@@ -159,6 +159,7 @@ func controlSchema() *ldapx.Schema {
 				"( 2.5.6.6 NAME 'person' SUP top STRUCTURAL MUST ( sn $ cn ) MAY ( userPassword $ telephoneNumber $ seeAlso $ description ) )",
 				"( 2.5.6.7 NAME 'organizationalPerson' SUP person STRUCTURAL MAY ( postalAddress $ l $ st ) )",
 				"( 2.16.840.1.113730.3.2.2 NAME 'inetOrgPerson' SUP organizationalPerson STRUCTURAL MAY ( mail $ uid $ userCertificate ) )",
+				"( 2.5.6.9 NAME 'groupOfNames' SUP top STRUCTURAL MUST ( cn $ member ) MAY ( owner $ seeAlso $ businessCategory $ o $ ou $ description ) )",
 			}},
 			{Name: "attributeTypes", Values: []string{
 				"( 2.5.4.3 NAME ( 'cn' 'commonName' ) SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 )",
@@ -874,9 +875,11 @@ func TestEditFormBooleanUnchangedSubmit(t *testing.T) {
 	}
 	h := testHandler(t, fake)
 	form := url.Values{
-		"booleanAttr": {"TRUE"},
-		"sn":          {"Davis"},
-		"stage":       {"apply"},
+		"booleanAttr":   {"TRUE"},
+		"dnAttr":        {"cn=manager,ou=People,dc=example,dc=com"},
+		"postalAddress": {"123 Main St\nSpringfield"},
+		"sn":            {"Davis"},
+		"stage":         {"apply"},
 	}
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
@@ -892,14 +895,248 @@ func TestEditFormBooleanUnchangedSubmit(t *testing.T) {
 }
 
 func TestBooleanOptions(t *testing.T) {
-	empty := booleanOptions(nil)
-	if len(empty) != 3 || empty[0].ID != "" || empty[0].Display != "(not set)" ||
-		empty[1].ID != "TRUE" || empty[2].ID != "FALSE" {
-		t.Errorf("booleanOptions(nil) = %+v", empty)
+	opts := booleanOptions(false, nil)
+	if len(opts) != 3 || opts[0].ID != "" || opts[0].Display != "(not set)" ||
+		opts[1].ID != "TRUE" || opts[2].ID != "FALSE" {
+		t.Errorf("booleanOptions(MAY, empty) = %+v", opts)
 	}
-	set := booleanOptions([]string{"TRUE"})
-	if len(set) != 2 || set[0].ID != "TRUE" || set[1].ID != "FALSE" {
-		t.Errorf("booleanOptions([TRUE]) = %+v", set)
+	requiredSet := booleanOptions(true, []string{"TRUE"})
+	if len(requiredSet) != 2 || requiredSet[0].ID != "TRUE" {
+		t.Errorf("booleanOptions(MUST, set) must have no (not set): %+v", requiredSet)
+	}
+	requiredEmpty := booleanOptions(true, nil)
+	if len(requiredEmpty) != 3 || requiredEmpty[0].ID != "" {
+		t.Errorf("booleanOptions(MUST, empty) must include (not set): %+v", requiredEmpty)
+	}
+}
+
+func TestEditMultiValueRemoveAllDeletes(t *testing.T) {
+	var got []ldap.Change
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{posixGroupEntry()}}, nil
+		},
+		modifyFn: func(ctx context.Context, dn string, changes []ldap.Change) error {
+			got = changes
+			return nil
+		},
+	}
+	h := testHandler(t, fake)
+	// The user removed every memberUid row: the field is absent from POST.
+	form := url.Values{
+		"gidNumber": {"100"},
+		"cn":        {"staff"},
+		"stage":     {"apply"},
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=staff,ou=Groups,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("dn", "cn=staff,ou=Groups,dc=example,dc=com")
+	h.EditSubmit(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("code = %d: %s", rr.Code, rr.Body.String())
+	}
+	if len(got) != 1 || got[0].Operation != uint(ldap.DeleteAttribute) ||
+		got[0].Modification.Type != "memberUid" {
+		t.Fatalf("remove-all must delete memberUid, got %+v", got)
+	}
+}
+
+func TestEditBooleanClear(t *testing.T) {
+	var got []ldap.Change
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		schema: controlSchema(),
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{schemaControlsEntry()}}, nil
+		},
+		modifyFn: func(ctx context.Context, dn string, changes []ldap.Change) error {
+			got = changes
+			return nil
+		},
+	}
+	h := testHandler(t, fake)
+	form := url.Values{
+		"booleanAttr":   {""}, // "(not set)" selected
+		"dnAttr":        {"cn=manager,ou=People,dc=example,dc=com"},
+		"postalAddress": {"123 Main St\nSpringfield"},
+		"sn":            {"Davis"},
+		"stage":         {"apply"},
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
+	h.EditSubmit(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("code = %d: %s", rr.Code, rr.Body.String())
+	}
+	if len(got) != 1 || got[0].Operation != uint(ldap.DeleteAttribute) ||
+		got[0].Modification.Type != "booleanAttr" {
+		t.Fatalf("clearing boolean must delete it, got %+v", got)
+	}
+}
+
+func TestEditSingleValueClear(t *testing.T) {
+	var got []ldap.Change
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{inetOrgPersonEntry()}}, nil
+		},
+		modifyFn: func(ctx context.Context, dn string, changes []ldap.Change) error {
+			got = changes
+			return nil
+		},
+	}
+	h := testHandler(t, fake)
+	form := editFormValues()
+	form.Set("mail", "")
+	form.Set("stage", "apply")
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=alice,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("dn", "cn=alice,ou=People,dc=example,dc=com")
+	h.EditSubmit(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("code = %d: %s", rr.Code, rr.Body.String())
+	}
+	found := false
+	for _, c := range got {
+		if c.Modification.Type == "mail" && c.Operation == uint(ldap.DeleteAttribute) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("clearing mail must delete it, got %+v", got)
+	}
+}
+
+func TestEditMultiValueEmptyRowNoFabrication(t *testing.T) {
+	entry := posixGroupEntry()
+	entry.Attributes = []*ldap.EntryAttribute{
+		{Name: "objectClass", Values: []string{"top", "posixGroup"}},
+		{Name: "cn", Values: []string{"staff"}},
+		{Name: "gidNumber", Values: []string{"100"}},
+	}
+	var modified bool
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{entry}}, nil
+		},
+		modifyFn: func(ctx context.Context, dn string, changes []ldap.Change) error {
+			modified = true
+			return nil
+		},
+	}
+	h := testHandler(t, fake)
+	form := url.Values{
+		"memberUid": {""}, // empty row's "(not set)" default
+		"gidNumber": {"100"},
+		"cn":        {"staff"},
+		"stage":     {"apply"},
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=staff,ou=Groups,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("dn", "cn=staff,ou=Groups,dc=example,dc=com")
+	h.EditSubmit(rr, req)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "No changes") {
+		t.Fatalf("code = %d: %s", rr.Code, rr.Body.String())
+	}
+	if modified {
+		t.Error("untouched empty select row must not fabricate a value")
+	}
+}
+
+func TestMergeOptionsNotSet(t *testing.T) {
+	opts := mergeOptions(nil, []tplengine.Value{{ID: "a", Display: "A"}, {ID: "b", Display: "B"}}, false)
+	if len(opts) != 3 || opts[0].ID != "" || opts[0].Display != "(not set)" {
+		t.Errorf("mergeOptions(nil, ...) = %+v", opts)
+	}
+	withValue := mergeOptions([]string{"b"}, []tplengine.Value{{ID: "a", Display: "A"}, {ID: "b", Display: "B"}}, false)
+	if len(withValue) != 3 || withValue[0].ID != "" || withValue[1].ID != "b" {
+		t.Errorf("mergeOptions([b], ...) = %+v", withValue)
+	}
+	requiredSet := mergeOptions([]string{"b"}, []tplengine.Value{{ID: "a", Display: "A"}, {ID: "b", Display: "B"}}, true)
+	if len(requiredSet) != 2 || requiredSet[0].ID != "b" {
+		t.Errorf("mergeOptions(MUST, set) must have no (not set): %+v", requiredSet)
+	}
+}
+
+func TestEditRequiredClearRejected(t *testing.T) {
+	var modified bool
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		schema: controlSchema(),
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{schemaControlsEntry()}}, nil
+		},
+		modifyFn: func(ctx context.Context, dn string, changes []ldap.Change) error {
+			modified = true
+			return nil
+		},
+	}
+	h := testHandler(t, fake)
+	form := url.Values{
+		"sn":    {""}, // sn is person MUST
+		"stage": {"apply"},
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
+	h.EditSubmit(rr, req)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "required by schema and cannot be cleared") {
+		t.Fatalf("code = %d: %s", rr.Code, rr.Body.String())
+	}
+	if modified {
+		t.Error("clearing a MUST attribute must not call Modify")
+	}
+}
+
+func groupOfNamesEntry() *ldap.Entry {
+	return &ldap.Entry{
+		DN: "cn=team,ou=Groups,dc=example,dc=com",
+		Attributes: []*ldap.EntryAttribute{
+			{Name: "objectClass", Values: []string{"top", "groupOfNames"}},
+			{Name: "cn", Values: []string{"team"}},
+			{Name: "member", Values: []string{"cn=alice,ou=People,dc=example,dc=com", "cn=bob,ou=People,dc=example,dc=com"}},
+		},
+	}
+}
+
+func TestEditRequiredMultiRemoveAllRejected(t *testing.T) {
+	var modified bool
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		schema: controlSchema(),
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{groupOfNamesEntry()}}, nil
+		},
+		modifyFn: func(ctx context.Context, dn string, changes []ldap.Change) error {
+			modified = true
+			return nil
+		},
+	}
+	h := testHandler(t, fake)
+	// Remove every member row: the field is absent from the POST.
+	form := url.Values{
+		"cn":    {"team"},
+		"stage": {"apply"},
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=team,ou=Groups,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("dn", "cn=team,ou=Groups,dc=example,dc=com")
+	h.EditSubmit(rr, req)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "required by schema and cannot be cleared") {
+		t.Fatalf("code = %d: %s", rr.Code, rr.Body.String())
+	}
+	if modified {
+		t.Error("removing all members of a MUST multi-value attribute must not call Modify")
 	}
 }
 

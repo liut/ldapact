@@ -1,7 +1,7 @@
 ---
 title: Schema-driven edit form controls
 type: feat
-status: completed
+status: active
 date: 2026-08-27
 origin: docs/brainstorms/ldapact-go-reimplementation.md
 ---
@@ -62,6 +62,35 @@ hardcoded name list instead of the schema's USAGE declaration.
   visible required text, focus, touch targets).
 - R7. Public docs updated so README/CHANGELOG describe schema-driven control
   rendering.
+- R8. Add-attribute: the edit form offers an "Add attribute" entry listing the
+  entry's effective objectClass MUST/MAY attributes (SUP-resolved) that are
+  not already present, and the added attribute renders with the same
+  schema-driven control classification and round-trips through review/apply.
+- R9. Delete/clear: every editable attribute can be cleared or removed through
+  the form — single-value by emptying the input, multi-value by removing all
+  rows, boolean by choosing "(not set)", or via an explicit per-attribute
+  "Delete attribute" action; an empty submitted value set produces a Delete
+  change (multi-value remove-all must not fall back to the entry's values).
+  **Schema-MUST attributes are excluded: they cannot be deleted or cleared**
+  (server-enforced — a Delete targeting a required attribute that currently
+  has a value is rejected with an inline error and no LDAP call). MAY and
+  schema-unknown attributes are freely deletable.
+- R10. Binary replace: binary-syntax attributes keep their read-only value
+  display and gain a file-upload control; an uploaded file replaces the
+  attribute's value set through the review → apply flow (upload stashed
+  server-side between steps, size-capped, temp files cleaned up after apply).
+- R11. No-fabrication selects: single- and multi-value select fields always
+  include an empty "(not set)" option so an untouched submit cannot silently
+  create a value by browser-defaulting to the first option.
+- R12. ObjectClass add/remove through the edit form, with the following rules
+  (server-enforced): STRUCTURAL objectClasses are never removable (and never
+  addable — an entry keeps exactly one structural chain); AUXILIARY
+  objectClasses can be added (any schema auxiliary class not already present);
+  an objectClass is removable only when it is AUXILIARY **and** none of its
+  effective attributes (MUST ∪ MAY through SUP) currently hold values on the
+  entry; ABSTRACT classes are neither addable nor removable. ObjectClass
+  changes flow through review → apply as a full-set Replace like any other
+  attribute.
 
 **Origin actors:** A1 (LDAP admin).
 **Origin flows:** F-Detail (edit gateway), F3 (password — unchanged).
@@ -73,16 +102,21 @@ hardcoded name list instead of the schema's USAGE declaration.
 
 - In scope: schema-driven control classification and rendering for GET/POST
   entry edit (both template and generic paths); required markers; schema-USAGE
-  operational exclusion; unit + integration tests; docs.
-- Not in scope: creation form controls (F2); "add attribute" entry point
-  (phpLDAPadmin add-attr parity); DN picker / browse button; binary
-  upload/edit; boolean checkbox style; password flow (F3); rename/move (F6);
-  search; schema browser; JSON API.
+  operational exclusion; add-attribute from the entry's objectClass schema;
+  delete/clear semantics for single/multi/boolean attributes; binary replace
+  via file upload; no-fabrication select options; unit + integration tests;
+  docs.
+- Not in scope: creation form controls (F2); DN picker / browse button;
+  boolean checkbox style; password flow (F3); rename/move (F6); search;
+  schema browser; JSON API.
 
 ### Deferred to Follow-Up Work
 
-- DN browse picker and binary file-upload editing (phpLDAPadmin
-  DnAttribute/BinaryAttribute parity): future iteration.
+- DN browse picker (phpLDAPadmin DnAttribute parity): future iteration.
+- Per-value binary upload (multi-value binary attributes replaced by a single
+  uploaded file in v1; per-value uploads are follow-up).
+- Create-flow select no-fabrication parity (the create form has the same
+  browser-default-fabrication behavior on untouched selects): follow-up.
 - Applying schema-driven control kinds to the creation form: future iteration
   (this plan touches only the edit flow).
 - Integer/number input type for Integer syntax: kept as text to match the
@@ -150,11 +184,12 @@ hardcoded name list instead of the schema's USAGE declaration.
   operational exclusion always win. Rationale: keeps R7 XML-template
   compatibility (origin) while making schema the source of truth for attribute
   semantics.
-- **Required markers informational only:** visible "Required (schema)" text,
-  no HTML `required` attribute and no hard block. Clearing a MUST attribute can
-  be a legitimate repair operation and the LDAP server remains the final
-  authority; hard-blocking would lock admins out of fixing schema-broken
-  entries.
+- **Required markers informational; MUST deletion forbidden:** visible
+  "Required (schema)" text, no HTML `required` attribute, and changing a MUST
+  attribute's value is never blocked. Deleting/clearing a MUST attribute,
+  however, is forbidden server-side (R9/U6) — the LDAP server would reject it
+  anyway, and the form should not offer an action that cannot succeed. A
+  broken entry missing a MUST attribute can still be repaired by adding it.
 - **Boolean select with "(not set)" option when empty:** current value is
   matched case-insensitively; when the entry has no value, the select includes
   an empty "(not set)" option so an untouched submit yields zero changes
@@ -179,14 +214,18 @@ hardcoded name list instead of the schema's USAGE declaration.
   presentation preserved (see Key Technical Decisions).
 - MUST enforcement: informational markers only.
 - Add-attribute entry point: out of scope (user-confirmed).
+- Select fabrication: resolved — every select field gains an always-available
+  "(not set)" option (extends the boolean-only decision; the deferred question
+  about other select-backed fields is answered "yes" because untouched submits
+  would otherwise fabricate a value).
 
 ### Deferred to Implementation
 
 - Exact binary/multi-line OID set refinement against the test directory (start
   from the oracle list; adjust if OpenLDAP exposes additional syntaxes).
-- Whether the "(not set)" empty option should appear for other select-backed
-  fields (start: boolean only).
 - Exact rendering placement/wording of the required marker in `form-field.html`.
+- Upload stash cleanup for abandoned review pages (temp files deleted on
+  apply; a TTL sweep for orphaned uploads is follow-up).
 
 ---
 
@@ -228,6 +267,14 @@ flowchart TB
     U1[U1 Schema control classification] --> U2[U2 Edit form schema-driven rendering]
     U2 --> U3[U3 Integration coverage]
     U2 --> U4[U4 Docs]
+    U2 --> U6[U6 Clear/delete + no-fabrication selects]
+    U6 --> U5[U5 Add/remove attribute surface]
+    U2 --> U7[U7 Binary upload replace]
+    U1 --> U9[U9 ObjectClass add/remove]
+    U5 --> U8[U8 Follow-up integration + docs]
+    U6 --> U8
+    U7 --> U8
+    U9 --> U8
 ```
 
 ### U1. Schema control classification
@@ -424,6 +471,292 @@ controls accurately.
 
 ---
 
+### U5. Add/remove attribute surface
+
+**Goal:** Give the edit form an "Add attribute" picker fed by the entry's
+effective objectClass MUST/MAY set (minus attributes already active) and an
+explicit per-attribute "Delete attribute" action, both round-tripping through
+review/apply.
+
+**Requirements:** R8, R9, R11
+
+**Dependencies:** U6 (clear semantics + select empty options)
+
+**Files:**
+- Modify: `pkg/entry/edit.go`
+- Modify: `pkg/web/templates/edit-form-content.html`
+- Modify: `pkg/web/templates/form-field.html`
+- Modify: `static/js/edit-multi.js` (delete-attribute clearing)
+- Test: `pkg/entry/entry_test.go`
+
+**Approach:**
+- Candidate set: `EffectiveMust ∪ EffectiveMay` (already SUP-resolved in
+  `pkg/ldapx`) minus (entry attributes ∪ template attributes ∪ already-added
+  attributes ∪ exclusions: `userPassword`, `objectClass`, operational
+  attributes, schema-unknown names). Rendered as a select + "Add attribute"
+  button posting `add_attr=<name>`.
+- On POST, an `add_attr` name is validated against the candidate set and the
+  attribute is rendered as an editable field (schema-driven kind, single/multi
+  shape, empty values); it then round-trips through review/apply like any
+  other field (review page's hidden inputs already carry all editable fields).
+- "Delete attribute" per editable field clears that field's inputs (JS,
+  mirroring `edit-multi.js`); without JS the user clears values manually.
+  The cleared field submits an empty set → Delete change (U6 semantics).
+- The "Delete attribute" action and clear affordances apply to MAY and
+  schema-unknown attributes only; schema-MUST attributes render without them
+  and are protected by the U6 MUST-delete guard.
+
+**Patterns to follow:**
+- `requiredAttrs`/`EffectiveMay` for the candidate set; `applySchemaControl`
+  for the added field's control; `edit-multi.js` add/remove-row pattern.
+
+**Test scenarios:**
+- Happy path: edit form lists a MAY attribute absent from the entry; adding it
+  renders the field prefilled empty, review shows old→new, apply creates the
+  value (integration in U8).
+- Happy path: MUST attributes missing from a broken entry appear in the
+  candidate list (repair path).
+- Edge case: already-present, template-listed, operational, `userPassword`,
+  `objectClass`, and schema-unknown names are absent from the candidate list.
+- Edge case: a crafted `add_attr` outside the candidate set is rejected (no
+  arbitrary attribute injection).
+- Edge case: an added multi-value attribute renders one empty row; an added
+  boolean renders the select with "(not set)" selected.
+- Edge case: adding an attribute but leaving it empty produces zero changes
+  (no fabricated empty attribute).
+
+**Verification:**
+- Add/review/apply round trip creates the attribute; delete/clear produces a
+  Delete change; candidate filtering unit tests pass.
+
+---
+
+### U6. Clear/delete semantics + no-fabrication selects
+
+**Goal:** Fix the diff semantics so every attribute can be cleared — multi-value
+remove-all must delete, booleans can be cleared, and untouched selects never
+fabricate a value.
+
+**Requirements:** R9, R11
+
+**Dependencies:** U1, U2
+
+**Files:**
+- Modify: `pkg/entry/edit.go`
+- Test: `pkg/entry/entry_test.go`
+
+**Approach:**
+- `fieldValues`: when a POST round-trip is in flight and the field name is
+  absent from the submitted form (all rows removed, or no hidden input on
+  apply), return an empty set — do not fall back to the entry's values.
+- `booleanOptions` / `mergeOptions`: include the empty "(not set)" option for
+  MAY (and schema-unknown) fields always (clear affordance + no-fabrication
+  default), but for schema-MUST fields only when the entry has no current
+  value (fabrication protection without a clear affordance).
+- MUST-delete guard: `EditSubmit` validates the change set before both review
+  and apply — a `Delete` (empty new value set) on a schema-required field
+  whose entry currently has values is rejected with an inline
+  "required by schema — cannot be cleared" error and no LDAP call; a required
+  field that is already absent (broken entry) can be left empty (no-op).
+- Empty submitted sets continue to produce `Delete` changes via `buildChanges`.
+
+**Patterns to follow:**
+- Existing `cleanValues`/`buildChanges`; `booleanOptions` pattern extended to
+  `mergeOptions`.
+
+**Test scenarios:**
+- Happy path: single-value clear → Delete change (existing behavior kept).
+- Happy path: multi-value remove-all (field absent from POST) → Delete change
+  and `Modify` is called (regression for the proven bug).
+- Happy path: boolean with a current value renders "(not set)" and choosing it
+  clears the attribute (Delete).
+- Edge case: clearing a MUST attribute (single-value empty, multi-value
+  remove-all, or boolean select) is rejected with an inline error and no
+  `Modify` call.
+- Edge case: a required select with a current value has no "(not set)" option;
+  a required select without a value does (no fabrication), and leaving it
+  untouched yields zero changes.
+- Edge case: a required field that is already absent from a broken entry can
+  be submitted empty (no-op, not an error).
+- Edge case: untouched single-value select with no current value submits
+  nothing (empty option default), producing zero changes — no fabricated value.
+- Edge case: multi-value select rows with values keep them; an empty row
+  selects "(not set)" and is dropped.
+- Edge case: unchanged canonical-boolean submit still yields zero changes.
+
+**Verification:**
+- The proof scenario (remove-all rows → attribute deleted) passes; existing
+  edit tests stay green.
+
+---
+
+### U7. Binary upload replace
+
+**Goal:** Let binary-syntax attributes be replaced by an uploaded file through
+the review → apply flow, keeping the read-only value display and photo
+previews.
+
+**Requirements:** R10
+
+**Dependencies:** U2 (edit flow; U6 empty-set semantics not required for
+replace)
+
+**Files:**
+- Modify: `pkg/entry/edit.go`
+- Modify: `pkg/web/templates/form-field.html`
+- Modify: `pkg/web/templates/edit-form-content.html`
+- Modify: `pkg/web/templates/edit-confirm-content.html`
+- Test: `pkg/entry/entry_test.go`, `pkg/entry/integration_test.go`
+
+**Approach:**
+- Binary fields render the existing read-only value (or photo preview) plus a
+  single `<input type="file" name="binfile_<attr>">`; the edit form switches
+  to `enctype="multipart/form-data"`.
+- On `stage=review`: an uploaded file for a binary attribute is read
+  (size-capped), written to a per-run temp file keyed by a random token, and
+  the review page carries `<input type="hidden" name="bintok_<attr>">`; the
+  review row shows "will replace with uploaded file (N bytes)".
+- On `stage=apply`: the token resolves to the stashed bytes and builds a
+  `Replace` change with the raw value; temp files are removed after apply
+  (success or failure). Invalid/expired tokens re-render the form with an
+  inline error (upload must be re-selected).
+- Attribute-name validation: only schema-classified binary attributes accept
+  uploads; multi-value binary attributes are replaced by the single uploaded
+  file (per-value upload deferred).
+- `jpegPhoto` keeps its preview; an upload replaces the stored image.
+
+**Patterns to follow:**
+- `photoBytes`/`maxPhotoBytes` for byte handling; existing inline error
+  re-render pattern; stateless round trip extended only by the opaque token.
+
+**Test scenarios:**
+- Happy path: uploading a file for a binary attribute renders a review row
+  naming the upload; apply replaces the value; re-fetch returns the new bytes
+  (integration with `jpegPhoto`).
+- Edge case: no file selected → no upload, attribute untouched, zero changes.
+- Edge case: file exceeding the size cap → inline error, no stash written.
+- Edge case: apply with a missing/invalid token → inline error, no Modify.
+- Edge case: crafted `binfile_`/`bintok_` for a non-binary attribute is
+  ignored (no arbitrary file writes).
+- Integration: replace alice's `jpegPhoto` via upload and re-fetch the new
+  image bytes.
+
+**Verification:**
+- Unit stash round trip + integration upload round trip pass; temp files are
+  removed after apply.
+
+---
+
+### U9. ObjectClass add/remove
+
+**Goal:** Make the entry's objectClass set editable with the structural /
+auxiliary / has-values rules, diffed and applied through the existing
+review → apply flow.
+
+**Requirements:** R12
+
+**Dependencies:** U1 (schema classification), U2 (edit flow)
+
+**Files:**
+- Modify: `pkg/ldapx/schema_controls.go` (`AuxiliaryClasses`,
+  `ClassAttributes` helpers)
+- Test: `pkg/ldapx/schema_test.go`
+- Modify: `pkg/entry/edit.go` (objectClass model, add/remove validation,
+  change building; objectClass no longer excluded from diff/apply)
+- Modify: `pkg/web/templates/edit-form-content.html` (objectClass section:
+  current classes with remove controls for removable auxiliaries + an
+  auxiliary "Add object class" picker)
+- Modify: `pkg/web/templates/edit-confirm-content.html` (objectClass diff row
+  + hidden round trip)
+- Test: `pkg/entry/entry_test.go`, `pkg/entry/integration_test.go`
+
+**Approach:**
+- `pkg/ldapx` gains `AuxiliaryClasses()` (sorted auxiliary class names from
+  the schema) and `ClassAttributes(name)` (effective MUST ∪ MAY through SUP,
+  deduplicated) — the latter drives the "has values" check.
+- The objectClass field model changes from read-only text to a dedicated
+  section: current classes listed, each removable auxiliary (no contributing
+  values) with a "Remove" button; an "Add object class" select lists schema
+  auxiliary classes not already present.
+- `add_oc=<name>` / `remove_oc=<name>` are validated server-side and applied
+  to the model immediately (stateless re-render, other field values preserved
+  via the submitted round trip); on review/apply the new class set travels as
+  hidden `objectClass` inputs and produces a full-set Replace diff when
+  changed.
+- Validation (both the incremental add/remove and the apply round trip):
+  additions must be schema AUXILIARY and not already present; removals must be
+  present, AUXILIARY, and have no effective attribute values on the entry;
+  STRUCTURAL/ABSTRACT classes can never be added or removed; crafted
+  submissions are rejected with inline errors and no LDAP call.
+- `buildChanges`/`renderEditConfirm` stop skipping `objectClass`: an empty new
+  set is impossible (structural chain stays), so the Replace always carries
+  the full set.
+
+**Patterns to follow:**
+- `effectiveAttrs` SUP walk for `ClassAttributes`; the U5 add-attribute
+  validation pattern; the review-page hidden round trip.
+
+**Test scenarios:**
+- Happy path: adding an AUXILIARY class from the picker re-renders the form
+  with it listed; review shows old→new classes; apply issues one Replace and
+  the class persists (integration in U8).
+- Happy path: removing a value-less AUXILIARY class flows through review →
+  apply and the class is gone on re-fetch.
+- Edge case: STRUCTURAL classes are absent from both the add picker and the
+  remove controls; ABSTRACT classes too.
+- Edge case: an AUXILIARY class whose effective attributes have values on the
+  entry is not removable (e.g. `posixAccount` on a user with `uidNumber`).
+- Edge case: crafted `add_oc` naming a structural/unknown class, or
+  `remove_oc` naming a structural/abstract/with-values class, is rejected
+  with an inline error and no LDAP call.
+- Edge case: removing a class and then leaving the form untouched re-renders
+  consistently (stateless round trip).
+
+**Verification:**
+- Add/remove unit tests + an integration add/remove round trip pass; the
+  objectClass diff appears on the review page; `make test` green.
+
+---
+
+### U8. Follow-up integration + docs
+
+**Goal:** Prove the new surfaces end to end against the real LDAP harness and
+update the public docs.
+
+**Requirements:** R7, R8, R9, R10, R11
+
+**Dependencies:** U5, U6, U7
+
+**Files:**
+- Modify: `pkg/entry/integration_test.go`
+- Modify: `test/integration/flows_test.go`
+- Modify: `README.md`
+- Modify: `CHANGELOG.md`
+
+**Approach:**
+- Package-level integration: add a MAY attribute to bob via the add-attribute
+  flow and verify persistence; clear a single-value attribute and verify
+  deletion; replace alice's `jpegPhoto` via upload and verify new bytes.
+- Flows harness: assert the add-attribute picker renders on a seeded user's
+  generic-editor form (a non-inetOrgPerson entry, e.g. a posixGroup) and that
+  the "(not set)" option exists on multi-value rows.
+- README Features/API rows + CHANGELOG entries for add/delete/binary/select
+  fixes.
+
+**Test scenarios:**
+- Integration: add `postalCode` (organizationalPerson MAY) to bob via the
+  form; review → apply; re-fetch shows it; clearing `postalAddress` deletes
+  it.
+- Integration: replace alice's `jpegPhoto` via file upload; re-fetch returns
+  the uploaded bytes.
+- Integration: existing edit round trips stay green.
+
+**Verification:**
+- `make test` with an LDAP backend green; README/CHANGELOG cover the new
+  edit-form capabilities.
+
+---
+
 ## System-Wide Impact
 
 - **Interaction graph:** classification helpers live in `pkg/ldapx` and are
@@ -444,6 +777,11 @@ controls accurately.
 - **Unchanged invariants:** creation, password, rename, delete, search, tree,
   and LDIF flows untouched; `userPassword` remains write-only via F3; no new
   dependencies; the `ldapx` API stays backward-compatible.
+- **New edit surfaces:** add-attribute candidates come from the schema
+  MUST/MAY sets and are validated server-side; binary uploads are size-capped,
+  token-scoped temp files cleaned after apply; the form becomes
+  `multipart/form-data` (field parsing unchanged); create-flow rendering is
+  unaffected by the select "(not set)" change (edit-only option assembly).
 
 ---
 
@@ -456,12 +794,19 @@ controls accurately.
 | Partial/omitted schema (AD-style) excludes or misclassifies attributes | Unknown names fall back to text; hardcoded exclusion map retained as fallback |
 | Required markers confuse or block clearing MUST values | Informational markers only, no HTML `required`; documented decision |
 | Binary attrs corrupted by text round-trip | Binary syntax → read-only in both paths, existing `[binary]` presentation |
+| Multi-value remove-all silently no-ops (proven bug) | U6 `fieldValues` POST semantics + explicit regression test |
+| Untouched selects fabricate the first option (proven bug class) | U6 always-present "(not set)" option on every select; zero-change tests |
+| MUST attribute cleared through the form (schema violation) | U6 MUST-delete guard rejects before any LDAP call; MAY-only delete UI in U5 |
+| Upload stash: orphaned temp files or token replay | Random opaque token, per-attribute name validation, cleanup on apply; TTL sweep deferred |
+| Add-attribute injection of operational/unknown attributes | Server-side candidate-set validation (R8) |
 
 ---
 
 ## Documentation / Operational Notes
 
 - README Features + API table updated (U4); CHANGELOG entries per unit.
+- README/CHANGELOG updated again for add/delete/binary/select-fix surfaces
+  (U8).
 - No config changes, no new env vars, no deployment surface changes; the
   strict `LDAPADM_*` allowlist is untouched.
 - No operational rollout notes; behavior change is confined to the edit form

@@ -129,6 +129,10 @@ func (h *Handler) EditSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	changes := buildChanges(e, fields)
+	if errMsg := h.validateChanges(e, fields, changes); errMsg != "" {
+		h.renderEditForm(w, r, e, fields, tmpl, map[string]string{"_form": errMsg})
+		return
+	}
 	switch r.FormValue("stage") {
 	case "review":
 		h.renderEditConfirm(w, r, e, tmpl, fields, changes)
@@ -286,7 +290,7 @@ func (h *Handler) templateEditFields(r *http.Request, e *ldap.Entry, tmpl *tplen
 		}
 		if options := h.editOptions(r, a); len(options) > 0 {
 			f.kind = "select"
-			f.options = mergeOptions(e.GetAttributeValues(a.ID), options)
+			f.options = mergeOptions(e.GetAttributeValues(a.ID), options, f.required)
 		}
 		sk, hasSchemaKind := h.schemaControlKind(a.ID)
 		if hasSchemaKind {
@@ -413,6 +417,26 @@ func buildChanges(e *ldap.Entry, fields []editFieldModel) []ldap.Change {
 	return changes
 }
 
+// validateChanges rejects Delete changes on schema-required attributes that
+// currently hold values: MUST attributes cannot be cleared or removed.
+// Returns a user-facing error message, or "" when the change set is valid.
+func (h *Handler) validateChanges(e *ldap.Entry, fields []editFieldModel, changes []ldap.Change) string {
+	for _, c := range changes {
+		if c.Operation != uint(ldap.DeleteAttribute) {
+			continue
+		}
+		for _, f := range fields {
+			if !f.required || !strings.EqualFold(f.id, c.Modification.Type) {
+				continue
+			}
+			if len(cleanValues(e.GetAttributeValues(f.id))) > 0 {
+				return f.display + " is required by schema and cannot be cleared."
+			}
+		}
+	}
+	return ""
+}
+
 func (h *Handler) renderEditForm(w http.ResponseWriter, r *http.Request, e *ldap.Entry, fields []editFieldModel, tmpl *tplengine.Template, errs map[string]string) {
 	title := "the generic editor"
 	name := ""
@@ -529,15 +553,17 @@ func (h *Handler) schemaControlKind(name string) (ldapx.ControlKind, bool) {
 	return h.client.Schema().ControlKind(name)
 }
 
-// booleanOptions returns the TRUE/FALSE options for a Boolean-syntax field,
-// including an empty "(not set)" option when the entry has no current value
-// so an untouched submit stays a no-op instead of fabricating FALSE.
-func booleanOptions(current []string) []tplengine.Value {
+// booleanOptions returns the TRUE/FALSE options for a Boolean-syntax field.
+// The empty "(not set)" option is included for MAY/schema-unknown fields
+// (browser default against fabrication + clear affordance) and for required
+// fields only when the entry has no current value (fabrication protection
+// without a clear affordance — MUST attributes cannot be cleared).
+func booleanOptions(required bool, current []string) []tplengine.Value {
 	opts := []tplengine.Value{
 		{ID: "TRUE", Display: "TRUE"},
 		{ID: "FALSE", Display: "FALSE"},
 	}
-	if len(current) == 0 {
+	if !required || len(current) == 0 {
 		opts = append([]tplengine.Value{{ID: "", Display: "(not set)"}}, opts...)
 	}
 	return opts
@@ -550,7 +576,7 @@ func applySchemaControl(f *editFieldModel, sk ldapx.ControlKind, current []strin
 	switch sk {
 	case ldapx.ControlKindSelect:
 		f.kind = "select"
-		f.options = booleanOptions(current)
+		f.options = booleanOptions(f.required, current)
 	case ldapx.ControlKindReadonly:
 		if !f.readonly {
 			f.readonly = true
@@ -636,13 +662,16 @@ func toFormField(f editFieldModel, dn string) FormField {
 	return ff
 }
 
-// fieldValues returns the current entry values, or the submitted values
-// when a POST round-trip is in flight.
+// fieldValues returns the current entry values, or the submitted values when
+// a POST round-trip is in flight. On POST, a field absent from the form means
+// the user removed every value (e.g. all multi-value rows): it must NOT fall
+// back to the entry's values, or removal would silently no-op.
 func fieldValues(e *ldap.Entry, id string, submitted map[string][]string) []string {
 	if submitted != nil {
 		if vs, ok := submitted[strings.ToLower(id)]; ok {
 			return cleanValues(vs)
 		}
+		return nil
 	}
 	return cleanValues(e.GetAttributeValues(id))
 }
@@ -722,10 +751,16 @@ func fieldKind(a *tplengine.Attribute) string {
 }
 
 // mergeOptions keeps current entry values first so a picklist-backed edit
-// field always has the current value selectable.
-func mergeOptions(current []string, opts []tplengine.Value) []tplengine.Value {
+// field always has the current value selectable. For MAY/schema-unknown
+// fields it prepends an empty "(not set)" option (no-fabrication default +
+// clear affordance); for required fields the empty option appears only when
+// the entry has no current value.
+func mergeOptions(current []string, opts []tplengine.Value, required bool) []tplengine.Value {
 	seen := map[string]bool{}
-	out := make([]tplengine.Value, 0, len(opts)+len(current))
+	out := make([]tplengine.Value, 0, len(opts)+len(current)+1)
+	if !required || len(current) == 0 {
+		out = append(out, tplengine.Value{ID: "", Display: "(not set)"})
+	}
 	for _, v := range current {
 		v = strings.TrimSpace(v)
 		if v == "" || seen[v] {
