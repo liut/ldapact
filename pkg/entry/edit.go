@@ -315,6 +315,8 @@ func (h *Handler) templateEditFields(r *http.Request, e *ldap.Entry, tmpl *tplen
 		if !f.readonly {
 			f.values = fieldValues(e, a.ID, submitted)
 		}
+		// LDAP boolean values are case-insensitive; normalize to the select
+		// option spelling so the rendered control matches its value.
 		if hasSchemaKind && sk == ldapx.ControlKindSelect && len(f.values) > 0 && f.values[0] != "" {
 			f.values[0] = strings.ToUpper(f.values[0])
 		}
@@ -374,6 +376,8 @@ func (h *Handler) genericEditFields(e *ldap.Entry, submitted map[string][]string
 		if !f.readonly {
 			f.values = fieldValues(e, name, submitted)
 		}
+		// LDAP boolean values are case-insensitive; normalize to the select
+		// option spelling so the rendered control matches its value.
 		if hasSchemaKind && sk == ldapx.ControlKindSelect && len(f.values) > 0 && f.values[0] != "" {
 			f.values[0] = strings.ToUpper(f.values[0])
 		}
