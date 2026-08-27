@@ -290,21 +290,7 @@ func (h *Handler) templateEditFields(r *http.Request, e *ldap.Entry, tmpl *tplen
 		}
 		sk, hasSchemaKind := h.schemaControlKind(a.ID)
 		if hasSchemaKind {
-			switch sk {
-			case ldapx.ControlKindSelect:
-				f.kind = "select"
-				f.options = booleanOptions(e.GetAttributeValues(a.ID))
-			case ldapx.ControlKindReadonly:
-				if !f.readonly {
-					f.readonly = true
-					f.hint = "Binary value — not editable in this flow"
-					f.values = []string{"[binary]"}
-				}
-			case ldapx.ControlKindDN:
-				f.hint = "Distinguished Name"
-			case ldapx.ControlKindTextarea:
-				f.kind = "textarea"
-			}
+			applySchemaControl(&f, sk, e.GetAttributeValues(a.ID))
 		}
 		if f.readonly {
 			fields = append(fields, f)
@@ -371,21 +357,7 @@ func (h *Handler) genericEditFields(e *ldap.Entry, submitted map[string][]string
 		}
 		sk, hasSchemaKind := h.schemaControlKind(name)
 		if hasSchemaKind {
-			switch sk {
-			case ldapx.ControlKindSelect:
-				f.kind = "select"
-				f.options = booleanOptions(a.Values)
-			case ldapx.ControlKindReadonly:
-				if !f.readonly {
-					f.readonly = true
-					f.hint = "Binary value — not editable in this flow"
-					f.values = []string{"[binary]"}
-				}
-			case ldapx.ControlKindDN:
-				f.hint = "Distinguished Name"
-			case ldapx.ControlKindTextarea:
-				f.kind = "textarea"
-			}
+			applySchemaControl(&f, sk, a.Values)
 		}
 		if f.readonly {
 			fields = append(fields, f)
@@ -565,6 +537,27 @@ func booleanOptions(current []string) []tplengine.Value {
 		opts = append([]tplengine.Value{{ID: "", Display: "(not set)"}}, opts...)
 	}
 	return opts
+}
+
+// applySchemaControl refines a field model with the schema-derived control
+// kind. Binary read-only and boolean select always win over template
+// presentation; DN fields get a hint; textarea matches template textareas.
+func applySchemaControl(f *editFieldModel, sk ldapx.ControlKind, current []string) {
+	switch sk {
+	case ldapx.ControlKindSelect:
+		f.kind = "select"
+		f.options = booleanOptions(current)
+	case ldapx.ControlKindReadonly:
+		if !f.readonly {
+			f.readonly = true
+			f.hint = "Binary value — not editable in this flow"
+			f.values = []string{"[binary]"}
+		}
+	case ldapx.ControlKindDN:
+		f.hint = "Distinguished Name"
+	case ldapx.ControlKindTextarea:
+		f.kind = "textarea"
+	}
 }
 
 func (h *Handler) attrMultiValue(name string, tmplAttr *tplengine.Attribute) bool {
