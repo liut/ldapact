@@ -50,16 +50,25 @@ func TestFlowF1TreeBrowse(t *testing.T) {
 		t.Fatalf("home = %d", resp.StatusCode)
 	}
 	home := body(t, resp)
-	for _, want := range []string{`role="tree"`, "dc=example,dc=com", "Import LDIF", "Search"} {
+	for _, want := range []string{`role="tree"`, "dc=example,dc=com", "Import LDIF", "Search", "Schema"} {
 		if !strings.Contains(home, want) {
 			t.Errorf("home missing %q", want)
 		}
+	}
+	if !strings.Contains(home, `href="/api/schema/objectclass"`) {
+		t.Error("home toolbar must link to the schema browser")
+	}
+	if !strings.Contains(home, `href="/api/entry/dc%3Dexample%2Cdc%3Dcom"`) {
+		t.Error("home tree root must link to the detail page")
 	}
 
 	resp = do(t, http.MethodGet, "/api/tree/dc=example,dc=com/children?page=1&level=2", nil)
 	page1 := body(t, resp)
 	if !strings.Contains(page1, ">People<") || !strings.Contains(page1, ">Groups<") {
 		t.Errorf("root children: %s", page1)
+	}
+	if !strings.Contains(page1, `href="/api/entry/ou%3DPeople%2Cdc%3Dexample%2Cdc%3Dcom"`) {
+		t.Error("tree children must link to the detail page")
 	}
 
 	resp = do(t, http.MethodGet, "/api/tree/ou=People,dc=example,dc=com/children?page=1&level=3", nil)
@@ -191,5 +200,90 @@ func TestFlowF7F8(t *testing.T) {
 	resp = do(t, http.MethodGet, "/api/search?q=(uid=u0001", nil)
 	if !strings.Contains(body(t, resp), "filter syntax error at position") {
 		t.Error("invalid filter feedback missing")
+	}
+}
+
+// TestFlowEditSearch closes the R1/R2 loop: detail → edit → review → apply →
+// verify, plus the R4 search scopes and sort against the seeded tree.
+func TestFlowEditSearch(t *testing.T) {
+	dn := "uid=u0005,ou=People,dc=example,dc=com"
+
+	// Detail page names the matched modification template.
+	resp := do(t, http.MethodGet, "/api/entry/"+dn, nil)
+	detailBody := body(t, resp)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(detailBody, "Generic: Address Book Entry") || !strings.Contains(detailBody, "/edit") {
+		t.Fatalf("detail edit entry point missing (status %d): %.300s", resp.StatusCode, detailBody)
+	}
+
+	// Edit form renders with the template.
+	resp = do(t, http.MethodGet, "/api/entry/"+dn+"/edit", nil)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body(t, resp), "Generic: Address Book Entry") {
+		t.Fatalf("edit form = %d: %.300s", resp.StatusCode, body(t, resp))
+	}
+
+	// Review then apply: change mail, add telephoneNumber.
+	form := url.Values{
+		"givenName":                {"Useru0005"},
+		"sn":                       {"Useru0005"},
+		"cn":                       {"u0005"},
+		"jpegPhoto":                {""},
+		"o":                        {""},
+		"street":                   {""},
+		"l":                        {""},
+		"st":                       {""},
+		"postalCode":               {""},
+		"telephoneNumber":          {"+1 555 0105"},
+		"facsimileTelephoneNumber": {""},
+		"mobile":                   {""},
+		"mail":                     {"u0005@example.com"},
+		"stage":                    {"review"},
+	}
+	resp = do(t, http.MethodPost, "/api/entry/"+dn+"/edit", form)
+	review := body(t, resp)
+	if !strings.Contains(review, "Review changes") || !strings.Contains(review, "u0005@example.com") {
+		t.Fatalf("review = %d: %.400s", resp.StatusCode, review)
+	}
+	form.Set("stage", "apply")
+	resp = do(t, http.MethodPost, "/api/entry/"+dn+"/edit", form)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body(t, resp), "Entry updated") {
+		t.Fatalf("apply = %d: %.400s", resp.StatusCode, body(t, resp))
+	}
+	if got := resp.Header.Get("X-Mutated-Subtree"); got != "ou=People,dc=example,dc=com" {
+		t.Errorf("mutated header = %q", got)
+	}
+	logs := envLogBuf.String()
+	if !strings.Contains(logs, `"event":"ldap.modify"`) || !strings.Contains(logs, `"dn":"`+dn+`"`) || !strings.Contains(logs, `"op_type":"modify"`) {
+		t.Errorf("edit audit missing AE6 shape: %.400s", logs)
+	}
+
+	// Base scope returns the edited entry only.
+	resp = do(t, http.MethodGet, "/api/search?q=(mail=u0005@example.com)&scope=base&base="+url.QueryEscape(dn), nil)
+	search := body(t, resp)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(search, "u0005@example.com") {
+		t.Fatalf("base search = %d: %.300s", resp.StatusCode, search)
+	}
+
+	// One level under ou=People returns direct children only.
+	resp = do(t, http.MethodGet, "/api/search?q=(objectClass=*)&scope=one&base="+url.QueryEscape("ou=People,dc=example,dc=com"), nil)
+	search = body(t, resp)
+	if !strings.Contains(search, "uid=u0001") || strings.Contains(search, ">dc=example,dc=com<") {
+		t.Errorf("one-level scope wrong: %.300s", search)
+	}
+
+	// Sort: dn desc orders the page newest-first (client-side default sort).
+	resp = do(t, http.MethodGet, "/api/search?q=(uid=u00*)&scope=one&base="+url.QueryEscape("ou=People,dc=example,dc=com")+"&sort=dn&dir=desc", nil)
+	search = body(t, resp)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(search, "uid=u0001") || !strings.Contains(search, "uid=u0050") {
+		t.Fatalf("sorted search = %d: %.300s", resp.StatusCode, search)
+	}
+	if strings.Index(search, "uid=u0050") > strings.Index(search, "uid=u0001") {
+		t.Error("dn desc: the returned page must be ordered highest DN first")
+	}
+
+	// Server-side sort control with fallback: modified desc must still return
+	// a usable page even when the directory rejects RFC 2891 sorting.
+	resp = do(t, http.MethodGet, "/api/search?q=(uid=u0001)&sort=modified&dir=desc", nil)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body(t, resp), "uid=u0001") {
+		t.Fatalf("modified sort search = %d: %.300s", resp.StatusCode, body(t, resp))
 	}
 }

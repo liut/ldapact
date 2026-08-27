@@ -3,18 +3,41 @@
   {{if .Hidden}}{{else}}
   <label for="f-{{.ID}}">{{.Display}}{{if .Required}} <span aria-hidden="true">*</span>{{end}}</label>
   {{if .HelpText}}<p class="field-help" id="help-{{.ID}}">{{.HelpText}}</p>{{end}}
-  {{if eq .Kind "select"}}
+  {{if .Preview}}<img class="media-preview" src="{{.Preview}}" alt="{{.Display}} preview">{{end}}
+  {{if .Redacted}}
+  <div class="field-redacted">
+    <input type="text" id="f-{{.ID}}" value="[redacted]" readonly>
+    <p class="field-help"><a href="{{.PasswordLink}}">Change password</a> — passwords are handled by the password flow.</p>
+  </div>
+  {{else if .Multi}}
+  <div class="multi-group" id="f-{{.ID}}-group">
+    {{range $i, $v := .MultiValues}}
+    <div class="multi-row">
+      {{if eq $.Kind "select"}}
+      <select id="f-{{$.ID}}" name="{{$.ID}}" {{if $.Readonly}}disabled{{end}}>
+        {{range $.Values}}<option value="{{.ID}}" {{if eq .ID $v}}selected{{end}}>{{.Display}}</option>{{end}}
+      </select>
+      {{else}}
+      <input type="text" name="{{$.ID}}" value="{{$v}}" {{if $.Readonly}}readonly{{end}}>
+      {{end}}
+      {{if not $.Readonly}}<button type="button" class="remove-row" data-target="f-{{$.ID}}-group" aria-label="Remove a {{$.Display}} value">−</button>{{end}}
+    </div>
+    {{end}}
+    {{if not .Readonly}}<button type="button" class="add-row" data-name="{{.ID}}" data-target="f-{{.ID}}-group">+ Add {{.Display}}</button>{{end}}
+  </div>
+  {{else if eq .Kind "select"}}
   <select id="f-{{.ID}}" name="{{.ID}}" {{if .Required}}required{{end}} {{if .Error}}aria-invalid="true" aria-describedby="err-{{.ID}}"{{end}}>
     {{if .NoMatches}}<option value="">(no candidates)</option>{{end}}
-    {{range .Values}}<option value="{{.ID}}">{{.Display}}</option>{{end}}
+    {{range .Values}}<option value="{{.ID}}" {{if eq .ID $.Value}}selected{{end}}>{{.Display}}</option>{{end}}
   </select>
   {{else if eq .Kind "textarea"}}
-  <textarea id="f-{{.ID}}" name="{{.ID}}" rows="4" {{if .Required}}required{{end}} {{if .Error}}aria-invalid="true" aria-describedby="err-{{.ID}}"{{end}}>{{.Value}}</textarea>
+  <textarea id="f-{{.ID}}" name="{{.ID}}" rows="4" {{if .Required}}required{{end}} {{if .Readonly}}readonly{{end}} {{if .Error}}aria-invalid="true" aria-describedby="err-{{.ID}}"{{end}}>{{.Value}}</textarea>
   {{else if eq .Kind "password"}}
   <input type="password" id="f-{{.ID}}" name="{{.ID}}" value="{{.Value}}" autocomplete="new-password" {{if .Required}}required{{end}} {{if .Error}}aria-invalid="true" aria-describedby="err-{{.ID}}"{{end}}>
   {{else}}
   <input type="text" id="f-{{.ID}}" name="{{.ID}}" value="{{.Value}}" {{if .Readonly}}readonly{{end}} {{if .Required}}required{{end}} {{if .Error}}aria-invalid="true" aria-describedby="err-{{.ID}}"{{end}}>
   {{end}}
+  {{if .Hint}}<p class="field-help">{{.Hint}}</p>{{end}}
   {{if .NoMatches}}<p class="notice">未找到候选</p>{{end}}
   {{if .MaxHit}}<p class="notice" role="alert">{{.Notice}}</p>{{end}}
   {{if .Error}}<p class="field-error" id="err-{{.ID}}" role="alert">{{.Error}}</p>{{end}}

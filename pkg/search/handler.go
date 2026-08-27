@@ -3,7 +3,9 @@ package search
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,18 +29,33 @@ type Row struct {
 	DN            string
 	ObjectClasses string
 	Modified      string
+	AttrValues    []string // aligned with Data.AttrColumns
 }
 
 // Data drives the F8 page.
 type Data struct {
-	Query   string
-	Scope   string
-	Base    string
-	Page    int
-	HasMore bool
-	Rows    []Row
-	Total   int
-	Error   string
+	Query        string
+	Scope        string
+	Base         string
+	Page         int
+	HasMore      bool
+	Rows         []Row
+	Total        int
+	Error        string
+	Sort         string
+	Dir          string
+	SortFallback bool
+	AttrColumns  []string
+	Columns      []Column
+	NextHref     string
+}
+
+// Column is one sortable table header.
+type Column struct {
+	Label  string
+	Href   string
+	Active bool
+	Dir    string
 }
 
 // Handler serves GET /api/search.
@@ -53,7 +70,17 @@ func New(client Searcher, renderer *web.Renderer) *Handler {
 	return &Handler{client: client, renderer: renderer, pageSize: DefaultPageSize}
 }
 
-// Search handles GET /api/search?q=&scope=subtree|global&base=&page=N.
+// sortAttrs maps the public sort keys to LDAP attribute names. DN has no
+// SortKey attribute; it sorts client-side.
+var sortAttrs = map[string]string{
+	"dn":          "",
+	"objectclass": "objectClass",
+	"modified":    "modifyTimestamp",
+}
+
+// Search handles GET /api/search with scope=base|one|subtree|global,
+// sort=dn|objectclass|modified, dir=asc|desc, size_limit, time_limit, and
+// attrs (R4 completion).
 func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	scope := strings.ToLower(r.URL.Query().Get("scope"))
@@ -72,7 +99,34 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 	if pageSize < 1 || pageSize > 500 {
 		pageSize = DefaultPageSize
 	}
-	data := Data{Query: q, Scope: scope, Base: base, Page: page}
+	sortKey := strings.ToLower(r.URL.Query().Get("sort"))
+	if sortKey == "" {
+		sortKey = "dn"
+	}
+	dir := strings.ToLower(r.URL.Query().Get("dir"))
+	if dir == "" {
+		dir = "asc"
+	}
+	sizeLimit, err := nonNegativeIntParam(r, "size_limit")
+	if err != nil {
+		http.Error(w, "Bad Request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	timeLimit, err := nonNegativeIntParam(r, "time_limit")
+	if err != nil {
+		http.Error(w, "Bad Request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	attrs := parseAttrs(r.URL.Query().Get("attrs"))
+	if _, ok := sortAttrs[sortKey]; !ok {
+		http.Error(w, "Bad Request: unknown sort — use dn, objectclass, or modified", http.StatusBadRequest)
+		return
+	}
+	if dir != "asc" && dir != "desc" {
+		http.Error(w, "Bad Request: dir must be asc or desc", http.StatusBadRequest)
+		return
+	}
+	data := Data{Query: q, Scope: scope, Base: base, Page: page, Sort: sortKey, Dir: dir}
 	if q == "" {
 		data.Error = "Enter a search filter."
 		h.renderPage(w, data)
@@ -83,34 +137,187 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 		h.renderPage(w, data)
 		return
 	}
-	scopeInt := ldap.ScopeWholeSubtree
+	scopeInt, ok := map[string]int{
+		"base":    ldap.ScopeBaseObject,
+		"one":     ldap.ScopeSingleLevel,
+		"subtree": ldap.ScopeWholeSubtree,
+	}[scope]
 	if scope == "global" {
+		scopeInt = ldap.ScopeWholeSubtree
 		base = ""
+		ok = true
 	}
-	res, err := h.client.Page(r.Context(), ldapx.SearchOptions{
+	if !ok {
+		http.Error(w, "Bad Request: unknown scope — use base, one, subtree, or global", http.StatusBadRequest)
+		return
+	}
+	reqAttrs := attrs
+	if len(reqAttrs) == 0 {
+		reqAttrs = []string{"objectClass", "modifyTimestamp"}
+	}
+	// The client-side fallback sort needs the sort attribute present, so
+	// request it even when the user's attrs list omits it.
+	if sortAttr := sortAttrs[sortKey]; sortAttr != "" && !containsString(reqAttrs, sortAttr) {
+		reqAttrs = append(reqAttrs, sortAttr)
+	}
+	opts := ldapx.SearchOptions{
 		BaseDN:         base,
 		Scope:          scopeInt,
 		Filter:         q,
-		Attrs:          []string{"objectClass", "modifyTimestamp"},
+		Attrs:          reqAttrs,
 		PageSize:       pageSize,
+		SizeLimit:      sizeLimit,
+		TimeLimit:      timeLimit,
 		AllowEmptyBase: scope == "global",
-	}, page)
+	}
+	if sortKey != "dn" {
+		opts.Sort = &ldapx.SortSpec{Attribute: sortAttrs[sortKey], Reverse: dir == "desc"}
+	}
+	res, err := h.client.Page(r.Context(), opts, page)
 	if err != nil {
 		data.Error = "Search failed: " + err.Error()
 		h.renderPage(w, data)
 		return
 	}
-	sort.SliceStable(res.Entries, func(i, j int) bool { return res.Entries[i].DN < res.Entries[j].DN })
+	sortPage(res.Entries, sortKey, dir)
 	data.HasMore = res.HasMore
+	data.SortFallback = res.SortFallback
 	for _, e := range res.Entries {
-		data.Rows = append(data.Rows, Row{
+		row := Row{
 			DN:            e.DN,
 			ObjectClasses: strings.Join(e.GetAttributeValues("objectClass"), ", "),
 			Modified:      e.GetAttributeValue("modifyTimestamp"),
-		})
+		}
+		for _, a := range attrs {
+			row.AttrValues = append(row.AttrValues, strings.Join(e.GetAttributeValues(a), ", "))
+		}
+		data.Rows = append(data.Rows, row)
 	}
 	data.Total = len(data.Rows)
+	data.AttrColumns = attrs
+	sp := searchParams{
+		query: q, scope: scope, base: base, sort: sortKey, dir: dir,
+		attrs: strings.Join(attrs, ","), sizeLimit: sizeLimit, timeLimit: timeLimit,
+	}
+	if data.HasMore {
+		data.NextHref = sp.href(page+1, sortKey, dir)
+	}
+	if len(attrs) == 0 {
+		for _, col := range []struct{ label, key string }{
+			{"DN", "dn"}, {"Object classes", "objectclass"}, {"Last modified", "modified"},
+		} {
+			nextDir := "asc"
+			if sortKey == col.key && dir == "asc" {
+				nextDir = "desc"
+			}
+			data.Columns = append(data.Columns, Column{
+				Label:  col.label,
+				Href:   sp.href(1, col.key, nextDir),
+				Active: sortKey == col.key,
+				Dir:    dir,
+			})
+		}
+	} else {
+		nextDir := "asc"
+		if sortKey == "dn" && dir == "asc" {
+			nextDir = "desc"
+		}
+		data.Columns = append(data.Columns, Column{
+			Label:  "DN",
+			Href:   sp.href(1, "dn", nextDir),
+			Active: sortKey == "dn",
+			Dir:    dir,
+		})
+	}
 	h.renderPage(w, data)
+}
+
+// searchParams carries the current search URL state so pagination and sort
+// links preserve every parameter.
+type searchParams struct {
+	query, scope, base, sort, dir, attrs string
+	sizeLimit, timeLimit                 int
+}
+
+func (p searchParams) href(page int, sortKey, dir string) string {
+	v := url.Values{}
+	v.Set("q", p.query)
+	if p.scope != "" {
+		v.Set("scope", p.scope)
+	}
+	if p.base != "" {
+		v.Set("base", p.base)
+	}
+	if page > 0 {
+		v.Set("page", strconv.Itoa(page))
+	}
+	if sortKey != "" {
+		v.Set("sort", sortKey)
+		v.Set("dir", dir)
+	}
+	if p.sizeLimit > 0 {
+		v.Set("size_limit", strconv.Itoa(p.sizeLimit))
+	}
+	if p.timeLimit > 0 {
+		v.Set("time_limit", strconv.Itoa(p.timeLimit))
+	}
+	if p.attrs != "" {
+		v.Set("attrs", p.attrs)
+	}
+	return "/api/search?" + v.Encode()
+}
+
+// sortPage orders one result page by the requested key/direction. It is
+// applied on every response so the fallback path (directory refused the
+// server-side sort control) still returns ordered rows; when the server
+// honored the control the page is already ordered and this is idempotent.
+func sortPage(entries []*ldap.Entry, key, dir string) {
+	less := func(i, j int) bool {
+		switch key {
+		case "modified":
+			return entries[i].GetAttributeValue("modifyTimestamp") < entries[j].GetAttributeValue("modifyTimestamp")
+		case "objectclass":
+			return strings.Join(entries[i].GetAttributeValues("objectClass"), ", ") < strings.Join(entries[j].GetAttributeValues("objectClass"), ", ")
+		default:
+			return entries[i].DN < entries[j].DN
+		}
+	}
+	if dir == "desc" {
+		sort.SliceStable(entries, func(i, j int) bool { return less(j, i) })
+		return
+	}
+	sort.SliceStable(entries, less)
+}
+
+func nonNegativeIntParam(r *http.Request, name string) (int, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get(name))
+	if raw == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("%s must be a non-negative integer", name)
+	}
+	return n, nil
+}
+
+func parseAttrs(raw string) []string {
+	var out []string
+	for _, a := range strings.Split(raw, ",") {
+		if a = strings.TrimSpace(a); a != "" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func containsString(vs []string, want string) bool {
+	for _, v := range vs {
+		if strings.EqualFold(v, want) {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Handler) renderPage(w http.ResponseWriter, data Data) {

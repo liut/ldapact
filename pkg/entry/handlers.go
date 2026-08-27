@@ -1,5 +1,6 @@
 // Package entry implements the template-driven flows F2 (create), F3
-// (password change), F5 (delete), F6 (rename), and the F-Detail entry view.
+// (password change), F5 (delete), F6 (rename), entry edit (R1), and the
+// F-Detail entry view.
 package entry
 
 import (
@@ -9,6 +10,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path"
+	"sort"
 	"strings"
 
 	"github.com/go-ldap/ldap/v3"
@@ -114,10 +117,21 @@ func NewTemplateLoader(corpus fs.FS, customDir string) *TemplateLoader {
 // Load opens {name}.xml: custom directory first, then the embedded
 // creation corpus. Template names must be simple (no path separators).
 func (l *TemplateLoader) Load(name string) (*tplengine.Template, error) {
+	return l.load("creation", name)
+}
+
+// LoadModification opens modification/{name}.xml with the same custom-dir-
+// first resolution as Load. Modification templates parse with the shared
+// tplengine parser (R5).
+func (l *TemplateLoader) LoadModification(name string) (*tplengine.Template, error) {
+	return l.load("modification", name)
+}
+
+func (l *TemplateLoader) load(kind, name string) (*tplengine.Template, error) {
 	if name == "" || strings.ContainsAny(name, "/\\.") {
 		return nil, errors.New("entry: invalid template name")
 	}
-	rel := "creation/" + name + ".xml"
+	rel := kind + "/" + name + ".xml"
 	if l.customDir != "" {
 		p := l.customDir + "/" + rel
 		if f, err := os.Open(p); err == nil {
@@ -131,6 +145,32 @@ func (l *TemplateLoader) Load(name string) (*tplengine.Template, error) {
 	}
 	defer f.Close()
 	return tplengine.Parse(f, rel)
+}
+
+// ModificationNames returns the sorted modification-template base names from
+// the custom directory (first) and the embedded corpus, deduplicated.
+func (l *TemplateLoader) ModificationNames() []string {
+	seen := map[string]bool{}
+	if entries, err := fs.Glob(l.corpus, "modification/*.xml"); err == nil {
+		for _, e := range entries {
+			seen[strings.TrimSuffix(path.Base(e), path.Ext(e))] = true
+		}
+	}
+	if l.customDir != "" {
+		if entries, err := os.ReadDir(l.customDir + "/modification"); err == nil {
+			for _, e := range entries {
+				if !e.IsDir() && strings.HasSuffix(e.Name(), ".xml") {
+					seen[strings.TrimSuffix(e.Name(), ".xml")] = true
+				}
+			}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for n := range seen {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // renderPage renders a full page via the shared layout.

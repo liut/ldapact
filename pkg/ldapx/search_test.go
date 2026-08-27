@@ -11,7 +11,10 @@ import (
 // pagingFake serves three pages of two entries each, keyed by cookie.
 type pagingFake struct {
 	fakeConn
-	pageSize uint32
+	pageSize       uint32
+	rejectSort     bool
+	sortResultFail bool
+	lastSortCtrl   *ldap.ControlServerSideSorting
 }
 
 func (f *pagingFake) Search(req *ldap.SearchRequest) (*ldap.SearchResult, error) {
@@ -20,6 +23,12 @@ func (f *pagingFake) Search(req *ldap.SearchRequest) (*ldap.SearchResult, error)
 	if ctrlAny == nil {
 		// Validation search from Pool.Put: just answer successfully.
 		return &ldap.SearchResult{}, nil
+	}
+	if ctrl := ldap.FindControl(req.Controls, ldap.ControlTypeServerSideSorting); ctrl != nil {
+		f.lastSortCtrl = ctrl.(*ldap.ControlServerSideSorting)
+		if f.rejectSort {
+			return nil, ldap.NewError(ldap.LDAPResultUnwillingToPerform, errors.New("sort control unsupported"))
+		}
 	}
 	ctrl := ctrlAny.(*ldap.ControlPaging)
 	page := 1
@@ -43,6 +52,11 @@ func (f *pagingFake) Search(req *ldap.SearchRequest) (*ldap.SearchResult, error)
 			testEntry("cn=p" + string(rune('0'+page)) + "b,dc=example,dc=com"),
 		},
 		Controls: []ldap.Control{&ldap.ControlPaging{PagingSize: f.pageSize, Cookie: next}},
+	}
+	if f.sortResultFail && f.lastSortCtrl != nil {
+		res.Controls = append(res.Controls, &ldap.ControlServerSideSortingResult{
+			Result: ldap.ControlServerSideSortingCodeNoSuchAttribute,
+		})
 	}
 	return res, nil
 }
@@ -121,6 +135,68 @@ func TestPageDefaults(t *testing.T) {
 	}
 	if len(res.Entries) != 2 {
 		t.Errorf("page size should default; got %d entries", len(res.Entries))
+	}
+}
+
+func TestPageSortControlAttached(t *testing.T) {
+	f := &pagingFake{pageSize: 2}
+	c := &Client{pool: newTestPool(f), baseDN: "dc=example,dc=com"}
+	_, err := c.Page(context.Background(), SearchOptions{
+		Scope: ldap.ScopeSingleLevel, PageSize: 2,
+		Sort: &SortSpec{Attribute: "modifyTimestamp", Reverse: true},
+	}, 1)
+	if err != nil {
+		t.Fatalf("Page: %v", err)
+	}
+	if f.lastSortCtrl == nil || len(f.lastSortCtrl.SortKeys) != 1 {
+		t.Fatalf("sort control not attached: %+v", f.lastSortCtrl)
+	}
+	if f.lastSortCtrl.SortKeys[0].AttributeType != "modifyTimestamp" || !f.lastSortCtrl.SortKeys[0].Reverse {
+		t.Errorf("sort key = %+v", f.lastSortCtrl.SortKeys[0])
+	}
+}
+
+func TestPageSortControlAbsentByDefault(t *testing.T) {
+	f := &pagingFake{pageSize: 2}
+	c := &Client{pool: newTestPool(f), baseDN: "dc=example,dc=com"}
+	if _, err := c.Page(context.Background(), SearchOptions{Scope: ldap.ScopeSingleLevel, PageSize: 2}, 1); err != nil {
+		t.Fatalf("Page: %v", err)
+	}
+	if f.lastSortCtrl != nil {
+		t.Error("no sort control expected without Sort set")
+	}
+}
+
+func TestPageSortFallbackOnRejection(t *testing.T) {
+	f := &pagingFake{pageSize: 2, rejectSort: true}
+	c := &Client{pool: newTestPool(f), baseDN: "dc=example,dc=com"}
+	res, err := c.Page(context.Background(), SearchOptions{
+		Scope: ldap.ScopeSingleLevel, PageSize: 2,
+		Sort: &SortSpec{Attribute: "modifyTimestamp", Reverse: true},
+	}, 1)
+	if err != nil {
+		t.Fatalf("Page: %v", err)
+	}
+	if !res.SortFallback {
+		t.Error("want SortFallback after unwillingToPerform")
+	}
+	if len(res.Entries) != 2 {
+		t.Errorf("entries after fallback = %d", len(res.Entries))
+	}
+}
+
+func TestPageSortFallbackOnResultControl(t *testing.T) {
+	f := &pagingFake{pageSize: 2, sortResultFail: true}
+	c := &Client{pool: newTestPool(f), baseDN: "dc=example,dc=com"}
+	res, err := c.Page(context.Background(), SearchOptions{
+		Scope: ldap.ScopeSingleLevel, PageSize: 2,
+		Sort: &SortSpec{Attribute: "modifyTimestamp"},
+	}, 1)
+	if err != nil {
+		t.Fatalf("Page: %v", err)
+	}
+	if !res.SortFallback {
+		t.Error("want SortFallback when sortResult control reports failure")
 	}
 }
 

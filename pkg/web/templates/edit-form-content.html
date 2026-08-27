@@ -1,0 +1,24 @@
+{{define "edit-form-content"}}
+<nav aria-label="Breadcrumb">
+  <ol class="breadcrumbs">
+    {{range .Crumbs}}
+    <li>{{if .DN}}<a href="/api/entry/{{.DN | urlquery}}">{{.Label}}</a>{{else}}<span aria-hidden="true">{{.Label}}</span>{{end}}</li>
+    {{end}}
+  </ol>
+</nav>
+<section aria-labelledby="edit-title">
+  <h1 id="edit-title">Edit entry</h1>
+  <p class="muted">{{.DN}}</p>
+  <p class="field-help">Editing with {{if .TemplateTitle}}template: <strong>{{.TemplateTitle}}</strong>{{else}}the generic editor{{end}}.</p>
+  {{if .Errors}}<div class="error-box" role="alert" id="edit-error">{{index .Errors "_form"}}</div>{{end}}
+  <form method="post" action="/api/entry/{{.DN | urlquery}}/edit">
+    <input type="hidden" name="stage" value="review">
+    {{if .TemplateName}}<input type="hidden" name="template" value="{{.TemplateName}}">{{end}}
+    {{range .Attributes}}{{template "form-field.html" .}}{{end}}
+    <div class="form-actions">
+      <button type="submit" class="primary">Review changes</button>
+      <a class="secondary" href="/api/entry/{{.DN | urlquery}}">Cancel</a>
+    </div>
+  </form>
+</section>
+{{end}}

@@ -166,6 +166,18 @@ func entryDispatch(h *entry.Handler, w http.ResponseWriter, r *http.Request) {
 		} else {
 			h.RenameForm(w, r)
 		}
+	case "edit":
+		if r.Method == http.MethodPost {
+			h.EditSubmit(w, r)
+		} else {
+			h.EditForm(w, r)
+		}
+	case "photo":
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		h.Photo(w, r)
 	case "":
 		h.Detail(w, r)
 	default:

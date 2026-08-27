@@ -37,12 +37,42 @@ form input[aria-invalid="true"] {
   margin: 0.2rem 0;
 }
 
+th a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+th a:hover,
+th a:focus-visible {
+  text-decoration: underline;
+}
+
 .step-indicator {
   display: flex;
   gap: 0.5rem;
   list-style: none;
   padding: 0;
   margin: 0 0 1rem;
+}
+
+.media-preview {
+  display: block;
+  max-width: 12rem;
+  max-height: 12rem;
+  height: auto;
+  object-fit: contain;
+  margin: 0.25rem 0 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 2px;
+  background: #fff;
+}
+
+.form-field .media-preview,
+td .media-preview {
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 0.5rem;
 }
 
 .step-indicator li {

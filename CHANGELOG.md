@@ -3,6 +3,49 @@
 All notable changes to ldapact v1 are tracked here, one entry per implementation
 unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
 
+## Entry edit + search completion (2026-08-26)
+
+- U1 — Entry edit form: `GET /api/entry/{dn...}/edit` renders a prefilled
+  form from the best-matching `templates/modification/*.xml` template
+  (custom `templates_dir` first, most-specific objectClass match, `?template=`
+  override) with a generic attribute editor fallback. Multi-value attributes
+  render one input per value with add/remove controls; `userPassword` renders
+  `[redacted]` with an F3 link; RDN attributes and `objectClass` render
+  read-only; operational attributes are excluded.
+- U2 — Edit diff + apply: `POST /edit` with `stage=review` renders an
+  old→new table (phpLDAPadmin parity, stateless hidden-input round trip);
+  `stage=apply` builds `Replace`/`Delete` changes (full value sets, cleared
+  attributes deleted, unchanged skipped — no LDAP call on a no-op), audits
+  `event=ldap.modify` with `op_type=modify`, emits `X-Mutated-Subtree`, and
+  re-renders the form with inline errors on LDAP rejection.
+- U3 — Detail-page entry points: the actions list gains "Edit attributes"
+  naming the matched template or the generic editor; the `userPassword` row
+  keeps its F3 link.
+- U4 — Search R4 completion: `scope=base|one|subtree|global` (unknown → 400),
+  sortable columns (`sort=dn|objectclass|modified`, `dir=asc|desc`) via an
+  RFC 2891 server-side sort control with per-page client-sort fallback,
+  `size_limit`/`time_limit`, and comma-separated `attrs` rendered as extra
+  result columns. `SearchOptions` gains optional `Sort`; tree/export paths are
+  unchanged when it is unset.
+- U5 — Integration: package-level edit round trip (form → review → apply →
+  re-fetch) and an F1–F8 harness flow covering detail→edit→review→apply,
+  base/one-level scopes, DN-desc sort, and the modified-sort fallback against
+  a real directory.
+- Media rendering: `jpegPhoto` renders as an inline image via a new
+  `GET /api/entry/{dn...}/photo?idx=N` endpoint (raw octets or base64 text,
+  JPEG/PNG/GIF/WebP sniffed by magic bytes; never echoed as raw page text)
+  and `avatarPath` renders directly as an `<img>`; the edit form shows
+  thumbnails for both, with `jpegPhoto` kept read-only. Tree labels now link
+  to the entry detail page, and search column headers are visibly clickable.
+- Review pass (Tier 2, ce-code-review 20260827-004931): the template-path
+  edit fields now exclude `userPassword` and operational attributes (custom
+  templates cannot leak a stored hash) and render binary values read-only;
+  the chosen modification template round-trips through review/apply as a
+  hidden field so a forced `?template=` survives the two-step flow;
+  duplicated submitted values are deduped; sort-fallback pages state that
+  ordering applies within the page; size/time limits are documented as
+  per-request.
+
 ## Session DB path fallback (2026-08-26)
 
 - When `LDAPADM_DB_PATH` is unset and the default `/var/lib/ldapact`

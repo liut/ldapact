@@ -10,6 +10,8 @@
     <div class="form-field">
       <label for="scope">Scope</label>
       <select id="scope" name="scope">
+        <option value="base" {{if eq .Scope "base"}}selected{{end}}>Base entry</option>
+        <option value="one" {{if eq .Scope "one"}}selected{{end}}>One level</option>
         <option value="subtree" {{if eq .Scope "subtree"}}selected{{end}}>Subtree (from base)</option>
         <option value="global" {{if eq .Scope "global"}}selected{{end}}>Global (whole directory)</option>
       </select>
@@ -22,19 +24,28 @@
   {{if .Error}}<div class="error-box" role="alert" id="search-error">{{.Error}}</div>{{end}}
   {{if .Rows}}
   <p role="status">{{.Total}} results on this page{{if .HasMore}} — more available{{end}}</p>
+  {{if .SortFallback}}<p class="field-help">Ordering is applied within this page — the directory does not support server-side sorting.</p>{{end}}
   <table>
-    <thead><tr><th scope="col">DN</th><th scope="col">Object classes</th><th scope="col">Last modified</th></tr></thead>
+    <thead><tr>
+      {{if .AttrColumns}}
+      {{range .Columns}}<th scope="col">{{if .Active}}<span aria-current="true">{{.Label}} ({{.Dir}})</span>{{else}}<a href="{{.Href}}">{{.Label}}</a>{{end}}</th>{{end}}
+      {{range .AttrColumns}}<th scope="col">{{.}}</th>{{end}}
+      {{else}}
+      {{range .Columns}}<th scope="col">{{if .Active}}<span aria-current="true">{{.Label}} ({{.Dir}})</span>{{else}}<a href="{{.Href}}">{{.Label}}</a>{{end}}</th>{{end}}
+      {{end}}
+    </tr></thead>
     <tbody>
       {{range .Rows}}
       <tr>
         <td><a href="/api/entry/{{.DN | urlquery}}">{{.DN}}</a></td>
+        {{if $.AttrColumns}}{{range .AttrValues}}<td>{{.}}</td>{{end}}{{else}}
         <td>{{.ObjectClasses}}</td>
-        <td>{{.Modified}}</td>
+        <td>{{.Modified}}</td>{{end}}
       </tr>
       {{end}}
     </tbody>
   </table>
-  {{if .HasMore}}<p><a href="/api/search?q={{.Query | urlquery}}&amp;scope={{.Scope}}&amp;base={{.Base | urlquery}}&amp;page={{add .Page 1}}">Next page</a></p>{{end}}
+  {{if .HasMore}}<p><a href="{{.NextHref}}">Next page</a></p>{{end}}
   {{else if and .Query (not .Error)}}
   <p role="status">0 results</p>
   {{end}}

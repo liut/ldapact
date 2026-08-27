@@ -42,6 +42,13 @@ type FormField struct {
 	Notice    string
 	Error     string
 	Page      int
+	// Edit-flow extensions (the create flow never sets them).
+	Multi        bool
+	MultiValues  []string
+	Redacted     bool
+	PasswordLink string
+	Hint         string
+	Preview      string
 }
 
 // CreateForm handles GET /api/template/{name} (F2 form).

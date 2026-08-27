@@ -3,13 +3,14 @@
   <h1 id="tree-title">Directory</h1>
   <nav class="toolbar" aria-label="Tools">
     <a class="secondary" href="/api/search">Search</a>
+    <a class="secondary" href="/api/schema/objectclass">Schema</a>
     <a class="secondary" href="/api/import">Import LDIF</a>
     <a class="secondary" href="/api/export?dn={{.RootDN | urlquery}}&amp;scope=subtree">Export subtree</a>
   </nav>
   <div class="status-region" role="status" aria-live="polite" id="tree-status"></div>
   <ul role="tree" aria-label="Directory tree" id="directory-tree">
     <li role="treeitem" aria-level="1" aria-expanded="false" data-dn="{{.RootDN}}">
-      <span class="tree-label" title="{{.RootDN}}">{{.RootLabel}}</span>
+      <a class="tree-label" href="/api/entry/{{.RootDN | urlquery}}" title="{{.RootDN}}">{{.RootLabel}}</a>
       <button type="button" class="tree-toggle" aria-label="Toggle children of {{.RootLabel}}"
               hx-get="/api/tree/{{.RootDN | urlquery}}/children?page=1&amp;level=2&amp;id=children-root"
               hx-target="#children-root" hx-swap="innerHTML">▸</button>

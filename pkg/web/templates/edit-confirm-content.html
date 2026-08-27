@@ -1,0 +1,35 @@
+{{define "edit-confirm-content"}}
+<nav aria-label="Breadcrumb">
+  <ol class="breadcrumbs">
+    {{range .Crumbs}}
+    <li>{{if .DN}}<a href="/api/entry/{{.DN | urlquery}}">{{.Label}}</a>{{else}}<span aria-hidden="true">{{.Label}}</span>{{end}}</li>
+    {{end}}
+  </ol>
+</nav>
+<section aria-labelledby="confirm-title">
+  <h1 id="confirm-title">Review changes</h1>
+  <p class="muted">{{.DN}}</p>
+  <table>
+    <thead><tr><th scope="col">Attribute</th><th scope="col">Current value</th><th scope="col">New value</th></tr></thead>
+    <tbody>
+      {{range .Rows}}
+      <tr>
+        <th scope="row">{{.Name}}</th>
+        <td>{{if .Old}}{{range .Old}}<div>{{.}}</div>{{end}}{{else}}<span class="muted">(unset)</span>{{end}}</td>
+        <td>{{if .New}}{{range .New}}<div>{{.}}</div>{{end}}{{else}}<span class="muted">(cleared)</span>{{end}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  <form method="post" action="/api/entry/{{.DN | urlquery}}/edit">
+    <input type="hidden" name="stage" value="apply">
+    {{if .TemplateName}}<input type="hidden" name="template" value="{{.TemplateName}}">{{end}}
+    {{range $hf := .Hidden}}{{range $v := $hf.Values}}<input type="hidden" name="{{$hf.Name}}" value="{{$v}}">{{end}}{{end}}
+    <div class="form-actions">
+      <button type="submit" class="primary">Apply changes</button>
+      <a class="secondary" href="/api/entry/{{.DN | urlquery}}/edit">Back to edit</a>
+      <a class="secondary" href="/api/entry/{{.DN | urlquery}}">Cancel</a>
+    </div>
+  </form>
+</section>
+{{end}}

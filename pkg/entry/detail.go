@@ -17,12 +17,16 @@ type DetailData struct {
 	Crumbs         []tree.Crumb
 	Attributes     []DetailAttr
 	PasswordScheme string
+	EditTemplate   string
 }
 
 // DetailAttr is one row of the attribute table.
 type DetailAttr struct {
 	Name   string
 	Values []string
+	// Kind is "image" when Values hold <img> src values (photo attributes),
+	// "text" otherwise.
+	Kind string
 }
 
 // Detail handles GET /api/entry/{dn...}.
@@ -50,9 +54,15 @@ func (h *Handler) Detail(w http.ResponseWriter, r *http.Request) {
 	}
 	e := res.Entries[0]
 	data := DetailData{
-		DN:     e.DN,
-		RDN:    rdnValue(e.DN),
-		Crumbs: tree.Breadcrumbs(e.DN, h.client.BaseDN(), 5),
+		DN:           e.DN,
+		RDN:          rdnValue(e.DN),
+		Crumbs:       tree.Breadcrumbs(e.DN, h.client.BaseDN(), 5),
+		EditTemplate: "generic editor",
+	}
+	if tmpl, err := h.selectModificationTemplate(r, e); err != nil {
+		h.logger.Warn("modification template lookup failed", "event", "tpl.load_failed", "dn", e.DN, "error", err)
+	} else if tmpl != nil && tmpl.Title != "" {
+		data.EditTemplate = tmpl.Title
 	}
 	data.ObjectClasses = append(data.ObjectClasses, e.GetAttributeValues("objectClass")...)
 	for _, a := range e.Attributes {
@@ -65,6 +75,33 @@ func (h *Handler) Detail(w http.ResponseWriter, r *http.Request) {
 			data.Attributes = append(data.Attributes, DetailAttr{Name: a.Name, Values: []string{"[redacted]"}})
 			data.PasswordScheme = tplengine.DetectScheme(a.Values[0])
 			continue
+		}
+		if strings.EqualFold(a.Name, "jpegPhoto") {
+			var srcs []string
+			for i, v := range a.Values {
+				if _, _, ok := photoBytes(v); ok {
+					srcs = append(srcs, photoURL(e.DN, i))
+				}
+			}
+			if len(srcs) > 0 {
+				data.Attributes = append(data.Attributes, DetailAttr{Name: a.Name, Kind: "image", Values: srcs})
+				continue
+			}
+			// Unrecognized photo data: never echo raw octets into the page.
+			data.Attributes = append(data.Attributes, DetailAttr{Name: a.Name, Values: []string{"[binary]"}})
+			continue
+		}
+		if strings.EqualFold(a.Name, "avatarPath") {
+			var srcs []string
+			for _, v := range a.Values {
+				if imageURL(v) {
+					srcs = append(srcs, strings.TrimSpace(v))
+				}
+			}
+			if len(srcs) > 0 {
+				data.Attributes = append(data.Attributes, DetailAttr{Name: a.Name, Kind: "image", Values: srcs})
+				continue
+			}
 		}
 		data.Attributes = append(data.Attributes, DetailAttr{Name: a.Name, Values: a.Values})
 	}

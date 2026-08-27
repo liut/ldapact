@@ -15,12 +15,18 @@ static, embeddable binary (R17).
   server-side password hashing.
 - **F3 Password** — change passwords with RFC 2307 hashing (SSHA512 default),
   LDAP ppolicy error surfacing, and bind verification.
+- **Edit attributes** — modification-template-driven entry editing with a
+  generic editor fallback, review-then-apply, and multi-value support;
+  `userPassword` stays in the password flow (F3) and RDN changes stay in
+  Rename (F6).
 - **F4/F7 LDIF** — streaming import (per-entry continue + downloadable error
   report) and export (subtree streaming, `userPassword` redacted by default).
 - **F5/F6 Delete/Rename** — confirmation flows with typed-DN protection and
   ceiling-gated recursive subtree delete; rename/move across parents.
-- **F8 Search** — scoped, filtered, paginated search with inline filter
-  errors.
+- **F8 Search** — scoped (base/one/subtree/global), filtered, sortable,
+  paginated search with size/time limits, attribute selection, and inline
+  filter errors. Size/time limits apply per LDAP request; when the directory
+  rejects the RFC 2891 sort control, ordering is applied within each page.
 - **R5 Schema browser** — objectClass and attributeType lists/detail with
   MUST/MAY cross-navigation from the cached subschema.
 - Structured `slog` JSON audit of every mutation (`ldap.create/modify/delete/
@@ -176,9 +182,10 @@ The phpLDAPadmin 60+ PHP entry points collapse to ~13 REST routes:
 | `POST /api/entry/{dn...}/password` | F3 |
 | `POST /api/entry/{dn...}/delete` | F5 |
 | `POST /api/entry/{dn...}/rename` | F6 |
+| `GET/POST /api/entry/{dn...}/edit` | edit attributes (stage=review\|apply) |
 | `POST /api/import` · `GET /api/import/report/{id}` | F4 |
 | `GET /api/export?dn=...&scope=entry\|subtree` | F7 |
-| `GET /api/search?q=...&scope=...&page=N` | F8 |
+| `GET /api/search?q=...&scope=base\|one\|subtree\|global&sort=dn\|objectclass\|modified&dir=asc\|desc&size_limit=&time_limit=&attrs=cn,mail&page=N` | F8 |
 | `GET /api/schema/objectclass[/{name}]` · `GET /api/schema/attribute[/{name}]` | R5 |
 | `GET /healthz` | health |
 

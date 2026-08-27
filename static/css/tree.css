@@ -54,6 +54,17 @@
   max-width: 32rem;
 }
 
+a.tree-label {
+  display: inline-block;
+  vertical-align: middle;
+  text-decoration: none;
+}
+
+a.tree-label:hover,
+a.tree-label:focus-visible {
+  text-decoration: underline;
+}
+
 .tree-loading,
 .tree-empty {
   color: var(--color-muted);

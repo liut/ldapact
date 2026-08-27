@@ -15,12 +15,17 @@
     <thead><tr><th scope="col">Attribute</th><th scope="col">Values</th></tr></thead>
     <tbody>
       {{range .Attributes}}
-      <tr><th scope="row">{{.Name}}</th><td>{{range .Values}}<div>{{.}}</div>{{end}}</td></tr>
+      {{$attr := .}}
+      <tr><th scope="row">{{.Name}}</th><td>
+        {{if eq .Kind "image"}}{{range .Values}}<img class="media-preview" src="{{.}}" alt="{{$attr.Name}}">{{end}}
+        {{else}}{{range .Values}}<div>{{.}}</div>{{end}}{{end}}
+      </td></tr>
       {{end}}
     </tbody>
   </table>
   <h2>Actions</h2>
   <ul class="actions">
+    <li><a class="secondary" href="/api/entry/{{.DN | urlquery}}/edit">Edit attributes — {{.EditTemplate}}</a></li>
     <li><a class="secondary" href="/api/entry/{{.DN | urlquery}}/password">Change password{{if .PasswordScheme}} (current: {{.PasswordScheme}}){{end}}</a></li>
     <li><a class="secondary" href="/api/entry/{{.DN | urlquery}}/rename">Rename / move</a></li>
     <li><a class="secondary" href="/api/entry/{{.DN | urlquery}}/delete">Delete</a></li>

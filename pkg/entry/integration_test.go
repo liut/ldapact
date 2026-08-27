@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-ldap/ldap/v3"
 	"github.com/liut/ldapact/internal/testldap"
 	"github.com/liut/ldapact/pkg/ldapx"
 	"github.com/liut/ldapact/pkg/web"
@@ -118,5 +119,121 @@ func TestIntegrationCreatePasswordRenameDelete(t *testing.T) {
 	h.DeleteSubmit(rr, dReq)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("delete code = %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestIntegrationEditEntry exercises the R1 edit flow (form → review → apply
+// → verify via re-fetch) against a throwaway LDAP backend.
+func TestIntegrationEditEntry(t *testing.T) {
+	ctx := context.Background()
+	inst, err := testldap.Start(ctx)
+	if errors.Is(err, testldap.ErrUnavailable) {
+		t.Skip("no LDAP backend available: " + err.Error())
+	}
+	if err != nil {
+		t.Fatalf("start test LDAP: %v", err)
+	}
+	defer inst.Stop()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := inst.Config()
+	client, err := ldapx.New(ctx, cfg, logger)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer client.Close()
+
+	if err := client.Add(ctx, "ou=People,dc=example,dc=com", map[string][]string{
+		"objectClass": {"top", "organizationalUnit"}, "ou": {"People"},
+	}); err != nil {
+		t.Fatalf("seed OU: %v", err)
+	}
+	dn := "cn=alice,ou=People,dc=example,dc=com"
+	if err := client.Add(ctx, dn, map[string][]string{
+		"objectClass": {"top", "person", "inetOrgPerson"},
+		"cn":          {"alice"}, "sn": {"Smith"}, "givenName": {"Alice"},
+		"mail":      {"alice@example.com"},
+		"jpegPhoto": {string([]byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10})},
+	}); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+
+	renderer := web.New(web.MustParse(nil))
+	loader := NewTemplateLoader(os.DirFS("../../templates"), "")
+	h := New(client, renderer, logger, loader, nil, cfg)
+
+	// Detail page renders the photo attribute as an embedded image.
+	rr := httptest.NewRecorder()
+	dReq := httptest.NewRequest(http.MethodGet, "/api/entry/"+dn, nil)
+	dReq.SetPathValue("dn", dn)
+	h.Detail(rr, dReq)
+	if !strings.Contains(rr.Body.String(), `/photo?idx=0"`) {
+		t.Fatalf("detail photo rendering missing: %.300s", rr.Body.String())
+	}
+	prr := httptest.NewRecorder()
+	pReq := httptest.NewRequest(http.MethodGet, "/api/entry/"+dn+"/photo?idx=0", nil)
+	pReq.SetPathValue("dn", dn)
+	h.Photo(prr, pReq)
+	if prr.Code != http.StatusOK || prr.Header().Get("Content-Type") != "image/jpeg" {
+		t.Fatalf("photo endpoint = %d ct=%q", prr.Code, prr.Header().Get("Content-Type"))
+	}
+
+	// The modification template matches and prefills current values.
+	rr = httptest.NewRecorder()
+	gReq := httptest.NewRequest(http.MethodGet, "/api/entry/"+dn+"/edit", nil)
+	gReq.SetPathValue("dn", dn)
+	h.EditForm(rr, gReq)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "Generic: Address Book Entry") {
+		t.Fatalf("edit form = %d: %.400s", rr.Code, rr.Body.String())
+	}
+
+	form := url.Values{
+		"givenName":                {"Alice"},
+		"sn":                       {"Smith"},
+		"cn":                       {"alice"},
+		"jpegPhoto":                {""},
+		"o":                        {""},
+		"street":                   {""},
+		"l":                        {""},
+		"st":                       {""},
+		"postalCode":               {""},
+		"telephoneNumber":          {"+1 555 0100"},
+		"facsimileTelephoneNumber": {""},
+		"mobile":                   {""},
+		"mail":                     {"alice@new.example.com"},
+		"stage":                    {"review"},
+	}
+	rr = httptest.NewRecorder()
+	rReq := httptest.NewRequest(http.MethodPost, "/api/entry/"+dn+"/edit", strings.NewReader(form.Encode()))
+	rReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rReq.SetPathValue("dn", dn)
+	h.EditSubmit(rr, rReq)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "Review changes") {
+		t.Fatalf("review = %d: %.400s", rr.Code, rr.Body.String())
+	}
+
+	form.Set("stage", "apply")
+	rr = httptest.NewRecorder()
+	aReq := httptest.NewRequest(http.MethodPost, "/api/entry/"+dn+"/edit", strings.NewReader(form.Encode()))
+	aReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	aReq.SetPathValue("dn", dn)
+	h.EditSubmit(rr, aReq)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "Entry updated") {
+		t.Fatalf("apply = %d: %.400s", rr.Code, rr.Body.String())
+	}
+
+	res, err := client.Search(ctx, ldap.NewSearchRequest(dn, ldap.ScopeBaseObject,
+		ldap.NeverDerefAliases, 0, 0, false, "(objectClass=*)", []string{"*"}, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Entries) != 1 {
+		t.Fatalf("refetch entries = %d", len(res.Entries))
+	}
+	if got := res.Entries[0].GetAttributeValue("mail"); got != "alice@new.example.com" {
+		t.Errorf("mail = %q", got)
+	}
+	if got := res.Entries[0].GetAttributeValue("telephoneNumber"); got != "+1 555 0100" {
+		t.Errorf("telephoneNumber = %q", got)
 	}
 }
