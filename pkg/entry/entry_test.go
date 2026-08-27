@@ -148,6 +148,55 @@ func genericOUEntry() *ldap.Entry {
 	}
 }
 
+// controlSchema builds a subschema covering every control classification,
+// usage variant, and a person → organizationalPerson → inetOrgPerson SUP
+// chain.
+func controlSchema() *ldapx.Schema {
+	entry := &ldap.Entry{
+		DN: "cn=Subschema",
+		Attributes: []*ldap.EntryAttribute{
+			{Name: "objectClasses", Values: []string{
+				"( 2.5.6.6 NAME 'person' SUP top STRUCTURAL MUST ( sn $ cn ) MAY ( userPassword $ telephoneNumber $ seeAlso $ description ) )",
+				"( 2.5.6.7 NAME 'organizationalPerson' SUP person STRUCTURAL MAY ( postalAddress $ l $ st ) )",
+				"( 2.16.840.1.113730.3.2.2 NAME 'inetOrgPerson' SUP organizationalPerson STRUCTURAL MAY ( mail $ uid $ userCertificate ) )",
+			}},
+			{Name: "attributeTypes", Values: []string{
+				"( 2.5.4.3 NAME ( 'cn' 'commonName' ) SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 )",
+				"( 2.5.4.4 NAME ( 'sn' 'surname' ) SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 )",
+				"( 0.9.2342.19200300.100.1.3 NAME ( 'mail' 'rfc822Mailbox' ) SYNTAX 1.3.6.1.4.1.1466.115.121.1.26 )",
+				"( 2.5.4.16 NAME 'postalAddress' SYNTAX 1.3.6.1.4.1.1466.115.121.1.41 )",
+				"( 2.5.4.5 NAME 'booleanAttr' SYNTAX 1.3.6.1.4.1.1466.115.121.1.7 SINGLE-VALUE )",
+				"( 2.5.4.49 NAME 'dnAttr' SYNTAX 1.3.6.1.4.1.1466.115.121.1.12 )",
+				"( 2.5.4.36 NAME 'certificateAttr' SYNTAX 1.3.6.1.4.1.1466.115.121.1.8 )",
+				"( 1.3.6.1.4.1.9999.1.1 NAME 'operationalAttr' SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 USAGE directoryOperation )",
+			}},
+		},
+	}
+	s, err := ldapx.ParseSchema(entry)
+	if err != nil {
+		panic(err)
+	}
+	return s
+}
+
+// schemaControlsEntry is a plain person (no modification template matches,
+// so the generic editor renders) exercising every schema-driven control.
+func schemaControlsEntry() *ldap.Entry {
+	return &ldap.Entry{
+		DN: "cn=carol,ou=People,dc=example,dc=com",
+		Attributes: []*ldap.EntryAttribute{
+			{Name: "objectClass", Values: []string{"top", "person"}},
+			{Name: "cn", Values: []string{"carol"}},
+			{Name: "sn", Values: []string{"Davis"}},
+			{Name: "booleanAttr", Values: []string{"TRUE"}},
+			{Name: "dnAttr", Values: []string{"cn=manager,ou=People,dc=example,dc=com"}},
+			{Name: "certificateAttr", Values: []string{"\x00\x01"}},
+			{Name: "postalAddress", Values: []string{"123 Main St\nSpringfield"}},
+			{Name: "operationalAttr", Values: []string{"hidden"}},
+		},
+	}
+}
+
 func testHandlerWithLogger(t *testing.T, client EntryClient, buf *bytes.Buffer) *Handler {
 	t.Helper()
 	logger := slog.New(slog.NewJSONHandler(buf, nil))
@@ -702,6 +751,155 @@ func TestEditFormTemplateParseFailure(t *testing.T) {
 	h.EditForm(rr, req)
 	if rr.Code != http.StatusInternalServerError || !strings.Contains(rr.Body.String(), "missing") {
 		t.Fatalf("code = %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestEditFormSchemaControls(t *testing.T) {
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		schema: controlSchema(),
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{schemaControlsEntry()}}, nil
+		},
+	}
+	h := testHandler(t, fake)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", nil)
+	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
+	h.EditForm(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("code = %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+
+	// Boolean syntax → TRUE/FALSE select with the current value selected.
+	for _, want := range []string{`name="booleanAttr"`, `value="TRUE" selected`, `value="FALSE"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("boolean control missing %q", want)
+		}
+	}
+	// DN syntax → text input with a DN hint wired via aria-describedby.
+	for _, want := range []string{`name="dnAttr"`, `aria-describedby="hint-dnAttr"`, "Distinguished Name"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("DN control missing %q", want)
+		}
+	}
+	// Binary syntax → read-only placeholder.
+	for _, want := range []string{`name="certificateAttr"`, `value="[binary]"`, "readonly"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("binary control missing %q", want)
+		}
+	}
+	// Postal Address → textarea with the current value.
+	for _, want := range []string{`name="postalAddress"`, "<textarea", "123 Main St"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("textarea control missing %q", want)
+		}
+	}
+	// Schema USAGE excludes operational attributes.
+	if strings.Contains(body, "operationalAttr") {
+		t.Error("operational attribute must not render in the generic editor")
+	}
+	// MUST (sn via person) renders the informational required marker.
+	if !strings.Contains(body, `for="f-sn">sn <span class="schema-required">Required (schema)</span>`) {
+		t.Error("sn must carry the schema-required marker")
+	}
+}
+
+func TestEditFormTemplateRequiredMarkers(t *testing.T) {
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		schema: controlSchema(),
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{inetOrgPersonEntry()}}, nil
+		},
+	}
+	h := testHandler(t, fake)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/entry/cn=alice,ou=People,dc=example,dc=com/edit", nil)
+	req.SetPathValue("dn", "cn=alice,ou=People,dc=example,dc=com")
+	h.EditForm(rr, req)
+	body := rr.Body.String()
+	if !strings.Contains(body, `for="f-sn">Last name <span class="schema-required">Required (schema)</span>`) {
+		t.Error("template form must mark sn required by schema (person MUST via SUP)")
+	}
+	if !strings.Contains(body, `for="f-mail">Email</label>`) {
+		t.Error("mail (MAY) must not carry the schema-required marker")
+	}
+	// Template-declared textarea on a string attribute is preserved.
+	if !strings.Contains(body, `name="street"`) || !strings.Contains(body, "<textarea") {
+		t.Error("template type=textarea must survive schema classification")
+	}
+}
+
+func TestEditFormBooleanLowercase(t *testing.T) {
+	entry := schemaControlsEntry()
+	for _, a := range entry.Attributes {
+		if a.Name == "booleanAttr" {
+			a.Values = []string{"true"}
+		}
+	}
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		schema: controlSchema(),
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{entry}}, nil
+		},
+	}
+	h := testHandler(t, fake)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", nil)
+	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
+	h.EditForm(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("code = %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `value="TRUE" selected`) {
+		t.Error("lowercase boolean value must select the TRUE option")
+	}
+}
+
+func TestEditFormBooleanUnchangedSubmit(t *testing.T) {
+	modified := false
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		schema: controlSchema(),
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{schemaControlsEntry()}}, nil
+		},
+		modifyFn: func(ctx context.Context, dn string, changes []ldap.Change) error {
+			modified = true
+			return nil
+		},
+	}
+	h := testHandler(t, fake)
+	form := url.Values{
+		"booleanAttr": {"TRUE"},
+		"sn":          {"Davis"},
+		"stage":       {"apply"},
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
+	h.EditSubmit(rr, req)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "No changes") {
+		t.Fatalf("code = %d: %s", rr.Code, rr.Body.String())
+	}
+	if modified {
+		t.Error("unchanged boolean submit must not call Modify")
+	}
+}
+
+func TestBooleanOptions(t *testing.T) {
+	empty := booleanOptions(nil)
+	if len(empty) != 3 || empty[0].ID != "" || empty[0].Display != "(not set)" ||
+		empty[1].ID != "TRUE" || empty[2].ID != "FALSE" {
+		t.Errorf("booleanOptions(nil) = %+v", empty)
+	}
+	set := booleanOptions([]string{"TRUE"})
+	if len(set) != 2 || set[0].ID != "TRUE" || set[1].ID != "FALSE" {
+		t.Errorf("booleanOptions([TRUE]) = %+v", set)
 	}
 }
 

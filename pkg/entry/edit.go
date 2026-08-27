@@ -29,7 +29,7 @@ var operationalAttributes = map[string]bool{
 	"pwdchangedtime":        true,
 	"pwdfailuretime":        true,
 	"pwdhistory":            true,
-	"pwdpolicySubentry":     true,
+	"pwdpolicysubentry":     true,
 	"pwdreset":              true,
 	"structuralobjectclass": true,
 	"subschemasubentry":     true,
@@ -78,6 +78,7 @@ type editFieldModel struct {
 	multi    bool
 	readonly bool
 	redacted bool
+	required bool
 	options  []tplengine.Value
 	values   []string
 	helpText string
@@ -236,11 +237,12 @@ func (h *Handler) buildEditModel(r *http.Request, e *ldap.Entry, submitted map[s
 	if err != nil {
 		return nil, nil, err
 	}
+	required := h.requiredAttrs(e)
 	var fields []editFieldModel
 	if tmpl != nil {
-		fields = h.templateEditFields(r, e, tmpl, submitted)
+		fields = h.templateEditFields(r, e, tmpl, submitted, required)
 	} else {
-		fields = h.genericEditFields(e, submitted)
+		fields = h.genericEditFields(e, submitted, required)
 	}
 	fields = append([]editFieldModel{objectClassField(e)}, fields...)
 	if len(e.GetAttributeValues("userPassword")) > 0 {
@@ -249,7 +251,7 @@ func (h *Handler) buildEditModel(r *http.Request, e *ldap.Entry, submitted map[s
 	return fields, tmpl, nil
 }
 
-func (h *Handler) templateEditFields(r *http.Request, e *ldap.Entry, tmpl *tplengine.Template, submitted map[string][]string) []editFieldModel {
+func (h *Handler) templateEditFields(r *http.Request, e *ldap.Entry, tmpl *tplengine.Template, submitted map[string][]string, required map[string]bool) []editFieldModel {
 	tmpl.SortFormFields()
 	rdnAttrs := rdnAttributes(e.DN)
 	fields := make([]editFieldModel, 0, len(tmpl.Attributes))
@@ -258,7 +260,7 @@ func (h *Handler) templateEditFields(r *http.Request, e *ldap.Entry, tmpl *tplen
 			continue
 		}
 		lower := strings.ToLower(a.ID)
-		if lower == "userpassword" || operationalAttributes[lower] {
+		if lower == "userpassword" || h.isOperational(a.ID) {
 			continue
 		}
 		f := editFieldModel{
@@ -266,6 +268,7 @@ func (h *Handler) templateEditFields(r *http.Request, e *ldap.Entry, tmpl *tplen
 			display:  displayName(a),
 			kind:     fieldKind(a),
 			multi:    h.attrMultiValue(a.ID, a),
+			required: required[lower],
 			helpText: a.HelpText,
 		}
 		switch lower {
@@ -284,6 +287,24 @@ func (h *Handler) templateEditFields(r *http.Request, e *ldap.Entry, tmpl *tplen
 		if options := h.editOptions(r, a); len(options) > 0 {
 			f.kind = "select"
 			f.options = mergeOptions(e.GetAttributeValues(a.ID), options)
+		}
+		sk, hasSchemaKind := h.schemaControlKind(a.ID)
+		if hasSchemaKind {
+			switch sk {
+			case ldapx.ControlKindSelect:
+				f.kind = "select"
+				f.options = booleanOptions(e.GetAttributeValues(a.ID))
+			case ldapx.ControlKindReadonly:
+				if !f.readonly {
+					f.readonly = true
+					f.hint = "Binary value — not editable in this flow"
+					f.values = []string{"[binary]"}
+				}
+			case ldapx.ControlKindDN:
+				f.hint = "Distinguished Name"
+			case ldapx.ControlKindTextarea:
+				f.kind = "textarea"
+			}
 		}
 		if f.readonly {
 			fields = append(fields, f)
@@ -308,6 +329,9 @@ func (h *Handler) templateEditFields(r *http.Request, e *ldap.Entry, tmpl *tplen
 		if !f.readonly {
 			f.values = fieldValues(e, a.ID, submitted)
 		}
+		if hasSchemaKind && sk == ldapx.ControlKindSelect && len(f.values) > 0 && f.values[0] != "" {
+			f.values[0] = strings.ToUpper(f.values[0])
+		}
 		if len(f.values) == 0 {
 			f.values = []string{""}
 		}
@@ -316,20 +340,21 @@ func (h *Handler) templateEditFields(r *http.Request, e *ldap.Entry, tmpl *tplen
 	return fields
 }
 
-func (h *Handler) genericEditFields(e *ldap.Entry, submitted map[string][]string) []editFieldModel {
+func (h *Handler) genericEditFields(e *ldap.Entry, submitted map[string][]string, required map[string]bool) []editFieldModel {
 	rdnAttrs := rdnAttributes(e.DN)
 	var fields []editFieldModel
 	for _, a := range e.Attributes {
 		name := a.Name
 		lower := strings.ToLower(name)
-		if lower == "objectclass" || lower == "userpassword" || operationalAttributes[lower] || rdnAttrs[lower] {
+		if lower == "objectclass" || lower == "userpassword" || h.isOperational(name) || rdnAttrs[lower] {
 			continue
 		}
 		f := editFieldModel{
-			id:      name,
-			display: schemaDisplayName(h.client.Schema(), name),
-			kind:    "text",
-			multi:   h.attrMultiValue(name, nil),
+			id:       name,
+			display:  schemaDisplayName(h.client.Schema(), name),
+			kind:     "text",
+			multi:    h.attrMultiValue(name, nil),
+			required: required[lower],
 		}
 		switch lower {
 		case "jpegphoto":
@@ -342,6 +367,24 @@ func (h *Handler) genericEditFields(e *ldap.Entry, submitted map[string][]string
 		case "avatarpath":
 			if v := firstValue(a.Values); imageURL(v) {
 				f.preview = v
+			}
+		}
+		sk, hasSchemaKind := h.schemaControlKind(name)
+		if hasSchemaKind {
+			switch sk {
+			case ldapx.ControlKindSelect:
+				f.kind = "select"
+				f.options = booleanOptions(a.Values)
+			case ldapx.ControlKindReadonly:
+				if !f.readonly {
+					f.readonly = true
+					f.hint = "Binary value — not editable in this flow"
+					f.values = []string{"[binary]"}
+				}
+			case ldapx.ControlKindDN:
+				f.hint = "Distinguished Name"
+			case ldapx.ControlKindTextarea:
+				f.kind = "textarea"
 			}
 		}
 		if f.readonly {
@@ -358,6 +401,9 @@ func (h *Handler) genericEditFields(e *ldap.Entry, submitted map[string][]string
 		}
 		if !f.readonly {
 			f.values = fieldValues(e, name, submitted)
+		}
+		if hasSchemaKind && sk == ldapx.ControlKindSelect && len(f.values) > 0 && f.values[0] != "" {
+			f.values[0] = strings.ToUpper(f.values[0])
 		}
 		fields = append(fields, f)
 	}
@@ -473,6 +519,54 @@ func (h *Handler) editOptions(r *http.Request, a *tplengine.Attribute) []tplengi
 	return nil
 }
 
+// requiredAttrs returns the entry's effective schema-MUST attribute set
+// (resolved through SUP inheritance), keyed by lowercase name. Returns an
+// empty set when no schema is available.
+func (h *Handler) requiredAttrs(e *ldap.Entry) map[string]bool {
+	out := map[string]bool{}
+	if h.client.Schema() == nil {
+		return out
+	}
+	for _, name := range h.client.Schema().EffectiveMust(e.GetAttributeValues("objectClass")) {
+		out[strings.ToLower(name)] = true
+	}
+	return out
+}
+
+// isOperational reports whether an attribute must be excluded from editing:
+// the schema USAGE declaration is the primary signal, with the hardcoded
+// list retained as fallback for schema-unknown names.
+func (h *Handler) isOperational(name string) bool {
+	if h.client.Schema() != nil && h.client.Schema().IsOperational(name) {
+		return true
+	}
+	return operationalAttributes[strings.ToLower(name)]
+}
+
+// schemaControlKind classifies an attribute's edit control from its schema
+// syntax. ok is false when the schema is unavailable or the attribute is
+// unknown — callers fall back to their current rendering.
+func (h *Handler) schemaControlKind(name string) (ldapx.ControlKind, bool) {
+	if h.client.Schema() == nil {
+		return ldapx.ControlKindText, false
+	}
+	return h.client.Schema().ControlKind(name)
+}
+
+// booleanOptions returns the TRUE/FALSE options for a Boolean-syntax field,
+// including an empty "(not set)" option when the entry has no current value
+// so an untouched submit stays a no-op instead of fabricating FALSE.
+func booleanOptions(current []string) []tplengine.Value {
+	opts := []tplengine.Value{
+		{ID: "TRUE", Display: "TRUE"},
+		{ID: "FALSE", Display: "FALSE"},
+	}
+	if len(current) == 0 {
+		opts = append([]tplengine.Value{{ID: "", Display: "(not set)"}}, opts...)
+	}
+	return opts
+}
+
 func (h *Handler) attrMultiValue(name string, tmplAttr *tplengine.Attribute) bool {
 	if tmplAttr != nil {
 		for _, v := range tmplAttr.Values {
@@ -523,17 +617,18 @@ func passwordField() editFieldModel {
 
 func toFormField(f editFieldModel, dn string) FormField {
 	ff := FormField{
-		ID:          f.id,
-		Display:     f.display,
-		Kind:        f.kind,
-		Readonly:    f.readonly,
-		Multi:       f.multi,
-		MultiValues: f.values,
-		Values:      f.options,
-		Redacted:    f.redacted,
-		HelpText:    f.helpText,
-		Hint:        f.hint,
-		Preview:     f.preview,
+		ID:             f.id,
+		Display:        f.display,
+		Kind:           f.kind,
+		Readonly:       f.readonly,
+		Multi:          f.multi,
+		MultiValues:    f.values,
+		Values:         f.options,
+		Redacted:       f.redacted,
+		SchemaRequired: f.required,
+		HelpText:       f.helpText,
+		Hint:           f.hint,
+		Preview:        f.preview,
 	}
 	if f.redacted {
 		ff.PasswordLink = "/api/entry/" + url.PathEscape(dn) + "/password"
