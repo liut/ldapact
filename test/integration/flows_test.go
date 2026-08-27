@@ -217,8 +217,13 @@ func TestFlowEditSearch(t *testing.T) {
 
 	// Edit form renders with the template.
 	resp = do(t, http.MethodGet, "/api/entry/"+dn+"/edit", nil)
-	if resp.StatusCode != http.StatusOK || !strings.Contains(body(t, resp), "Generic: Address Book Entry") {
-		t.Fatalf("edit form = %d: %.300s", resp.StatusCode, body(t, resp))
+	editForm := body(t, resp)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(editForm, "Generic: Address Book Entry") {
+		t.Fatalf("edit form = %d: %.300s", resp.StatusCode, editForm)
+	}
+	// Schema-driven controls: sn (person MUST via SUP) carries the marker.
+	if !strings.Contains(editForm, `for="f-sn">Last name <span class="schema-required">Required (schema)</span>`) {
+		t.Error("template edit form must mark sn required by schema (person MUST)")
 	}
 
 	// Review then apply: change mail, add telephoneNumber.

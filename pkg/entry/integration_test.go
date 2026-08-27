@@ -157,6 +157,17 @@ func TestIntegrationEditEntry(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
+	// bob matches no modification template (person + organizationalPerson),
+	// so his edit form exercises the generic editor and its schema-driven
+	// controls; postalAddress (Postal Address syntax) is core-schema MAY.
+	bobDN := "cn=bob,ou=People,dc=example,dc=com"
+	if err := client.Add(ctx, bobDN, map[string][]string{
+		"objectClass":  {"top", "person", "organizationalPerson"},
+		"cn":           {"bob"}, "sn": {"Jones"},
+		"postalAddress": {"123 Main St\nSpringfield"},
+	}); err != nil {
+		t.Fatalf("seed generic-editor user: %v", err)
+	}
 
 	renderer := web.New(web.MustParse(nil))
 	loader := NewTemplateLoader(os.DirFS("../../templates"), "")
@@ -235,5 +246,70 @@ func TestIntegrationEditEntry(t *testing.T) {
 	}
 	if got := res.Entries[0].GetAttributeValue("telephoneNumber"); got != "+1 555 0100" {
 		t.Errorf("telephoneNumber = %q", got)
+	}
+
+	// Generic editor: postalAddress renders as a textarea prefilled, sn
+	// carries the schema-MUST marker, and no operational attrs leak in.
+	rr = httptest.NewRecorder()
+	bReq := httptest.NewRequest(http.MethodGet, "/api/entry/"+bobDN+"/edit", nil)
+	bReq.SetPathValue("dn", bobDN)
+	h.EditForm(rr, bReq)
+	bobForm := rr.Body.String()
+	if rr.Code != http.StatusOK {
+		t.Fatalf("bob edit form = %d: %.400s", rr.Code, bobForm)
+	}
+	for _, want := range []string{
+		"the generic editor",
+		`name="postalAddress"`,
+		"<textarea",
+		"123 Main St",
+		`for="f-sn">sn <span class="schema-required">Required (schema)</span>`,
+	} {
+		if !strings.Contains(bobForm, want) {
+			t.Errorf("generic edit form missing %q", want)
+		}
+	}
+
+	// Change postalAddress through review → apply; re-fetch confirms.
+	bobValues := url.Values{
+		"postalAddress": {"456 Oak Ave\nSpringfield"},
+		"sn":            {"Jones"},
+		"stage":         {"review"},
+	}
+	rr = httptest.NewRecorder()
+	bReq = httptest.NewRequest(http.MethodPost, "/api/entry/"+bobDN+"/edit", strings.NewReader(bobValues.Encode()))
+	bReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	bReq.SetPathValue("dn", bobDN)
+	h.EditSubmit(rr, bReq)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "456 Oak Ave") {
+		t.Fatalf("bob review = %d: %.400s", rr.Code, rr.Body.String())
+	}
+	bobValues.Set("stage", "apply")
+	rr = httptest.NewRecorder()
+	bReq = httptest.NewRequest(http.MethodPost, "/api/entry/"+bobDN+"/edit", strings.NewReader(bobValues.Encode()))
+	bReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	bReq.SetPathValue("dn", bobDN)
+	h.EditSubmit(rr, bReq)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "Entry updated") {
+		t.Fatalf("bob apply = %d: %.400s", rr.Code, rr.Body.String())
+	}
+	bRes, err := client.Search(ctx, ldap.NewSearchRequest(bobDN, ldap.ScopeBaseObject,
+		ldap.NeverDerefAliases, 0, 0, false, "(objectClass=*)", []string{"*"}, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bRes.Entries) != 1 || bRes.Entries[0].GetAttributeValue("postalAddress") != "456 Oak Ave\nSpringfield" {
+		t.Errorf("bob postalAddress after edit = %q (entries %d)",
+			bRes.Entries[0].GetAttributeValue("postalAddress"), len(bRes.Entries))
+	}
+
+	// Unchanged submit short-circuits to "No changes" (no Modify).
+	rr = httptest.NewRecorder()
+	bReq = httptest.NewRequest(http.MethodPost, "/api/entry/"+bobDN+"/edit", strings.NewReader(bobValues.Encode()))
+	bReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	bReq.SetPathValue("dn", bobDN)
+	h.EditSubmit(rr, bReq)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "No changes") {
+		t.Fatalf("bob unchanged apply = %d: %.400s", rr.Code, rr.Body.String())
 	}
 }
