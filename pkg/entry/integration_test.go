@@ -162,8 +162,8 @@ func TestIntegrationEditEntry(t *testing.T) {
 	// controls; postalAddress (Postal Address syntax) is core-schema MAY.
 	bobDN := "cn=bob,ou=People,dc=example,dc=com"
 	if err := client.Add(ctx, bobDN, map[string][]string{
-		"objectClass":  {"top", "person", "organizationalPerson"},
-		"cn":           {"bob"}, "sn": {"Jones"},
+		"objectClass": {"top", "person", "organizationalPerson"},
+		"cn":          {"bob"}, "sn": {"Jones"},
 		"postalAddress": {"123 Main St\nSpringfield"},
 	}); err != nil {
 		t.Fatalf("seed generic-editor user: %v", err)
