@@ -3,6 +3,31 @@
 All notable changes to ldapact v1 are tracked here, one entry per implementation
 unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
 
+## Schema-driven edit form controls (2026-08-27)
+
+- U1 — Schema control classification: `pkg/ldapx` now derives the edit-form
+  control kind from the attributeType RFC 4517 syntax (boolean → select,
+  DN syntaxes → DN field, binary syntaxes → read-only, Postal Address →
+  textarea), reports operational attributes from the schema USAGE
+  declaration, and resolves effective objectClass MUST/MAY sets through the
+  SUP chain.
+- U2 — Edit form schema-driven rendering: both the template-driven and
+  generic edit paths classify controls from the schema; boolean attributes
+  render as TRUE/FALSE selects (with a "(not set)" option when empty),
+  DN attributes carry a "Distinguished Name" hint, binary values are
+  read-only, Postal Address values render as textareas, schema-MUST
+  attributes show a visible "Required (schema)" marker (informational only),
+  and operational attributes are excluded via schema USAGE with the
+  hardcoded list retained as fallback. Template-declared presentation
+  (textarea, picklists, display names) is preserved where it does not
+  conflict with schema semantics.
+- U3 — Integration: the edit round trip now covers the generic editor path
+  with a Postal Address textarea against a real LDAP backend, the
+  schema-MUST marker on a template-driven form, and the unchanged-submit
+  short-circuit.
+- U4 — Docs: README features/API rows describe schema-driven control
+  rendering.
+
 ## Entry edit + search completion (2026-08-26)
 
 - U1 — Entry edit form: `GET /api/entry/{dn...}/edit` renders a prefilled

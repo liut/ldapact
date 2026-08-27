@@ -17,8 +17,12 @@ static, embeddable binary (R17).
   LDAP ppolicy error surfacing, and bind verification.
 - **Edit attributes** — modification-template-driven entry editing with a
   generic editor fallback, review-then-apply, and multi-value support;
-  `userPassword` stays in the password flow (F3) and RDN changes stay in
-  Rename (F6).
+  controls render per the LDAP schema definition (attributeType syntax picks
+  the control kind — boolean selects, DN fields, read-only binary, textareas —
+  single/multi-value shape, schema-MUST markers, and operational-attribute
+  exclusion), with template presentation preserved where it does not
+  conflict. `userPassword` stays in the password flow (F3) and RDN changes
+  stay in Rename (F6).
 - **F4/F7 LDIF** — streaming import (per-entry continue + downloadable error
   report) and export (subtree streaming, `userPassword` redacted by default).
 - **F5/F6 Delete/Rename** — confirmation flows with typed-DN protection and
@@ -182,7 +186,7 @@ The phpLDAPadmin 60+ PHP entry points collapse to ~13 REST routes:
 | `POST /api/entry/{dn...}/password` | F3 |
 | `POST /api/entry/{dn...}/delete` | F5 |
 | `POST /api/entry/{dn...}/rename` | F6 |
-| `GET/POST /api/entry/{dn...}/edit` | edit attributes (stage=review\|apply) |
+| `GET/POST /api/entry/{dn...}/edit` | edit attributes (stage=review\|apply); controls render per the LDAP schema |
 | `POST /api/import` · `GET /api/import/report/{id}` | F4 |
 | `GET /api/export?dn=...&scope=entry\|subtree` | F7 |
 | `GET /api/search?q=...&scope=base\|one\|subtree\|global&sort=dn\|objectclass\|modified&dir=asc\|desc&size_limit=&time_limit=&attrs=cn,mail&page=N` | F8 |
