@@ -17,6 +17,7 @@ import (
 type PasswordFormData struct {
 	DN            string
 	CurrentScheme string
+	NoPassword    bool
 	Error         string
 	Success       string
 }
@@ -24,6 +25,17 @@ type PasswordFormData struct {
 // PasswordForm handles GET /api/entry/{dn...}/password.
 func (h *Handler) PasswordForm(w http.ResponseWriter, r *http.Request) {
 	dn := r.PathValue("dn")
+	has, err := h.passwordAvailable(r, dn)
+	if err != nil {
+		h.dnError(w, r, err)
+		return
+	}
+	if !has {
+		h.renderPage(w, "Change password — ldapact", "password-form-content", PasswordFormData{
+			DN: dn, NoPassword: true, Error: "This entry has no userPassword attribute.",
+		})
+		return
+	}
 	scheme, err := h.currentScheme(r, dn)
 	if err != nil {
 		h.dnError(w, r, err)
@@ -47,6 +59,17 @@ func (h *Handler) PasswordChange(w http.ResponseWriter, r *http.Request) {
 	}
 	if newPW != confirm {
 		h.renderPage(w, "Change password — ldapact", "password-form-content", PasswordFormData{DN: dn, Error: "Passwords do not match"})
+		return
+	}
+	has, err := h.passwordAvailable(r, dn)
+	if err != nil {
+		h.dnError(w, r, err)
+		return
+	}
+	if !has {
+		h.renderPage(w, "Change password — ldapact", "password-form-content", PasswordFormData{
+			DN: dn, NoPassword: true, Error: "This entry has no userPassword attribute.",
+		})
 		return
 	}
 	scheme, err := h.currentScheme(r, dn)
@@ -104,6 +127,21 @@ func (h *Handler) currentScheme(r *http.Request, dn string) (string, error) {
 		return "none", nil
 	}
 	return tplengine.DetectScheme(vals[0]), nil
+}
+
+// passwordAvailable reports whether the entry has at least one userPassword
+// value (R14: the password-change affordance requires the attribute).
+func (h *Handler) passwordAvailable(r *http.Request, dn string) (bool, error) {
+	req := ldap.NewSearchRequest(dn, ldap.ScopeBaseObject, ldap.NeverDerefAliases,
+		0, 0, false, "(objectClass=*)", []string{"userPassword"}, nil)
+	res, err := h.client.Search(r.Context(), req)
+	if err != nil {
+		return false, err
+	}
+	if len(res.Entries) == 0 {
+		return false, fmt.Errorf("entry not found: %s", dn)
+	}
+	return len(res.Entries[0].GetAttributeValues("userPassword")) > 0, nil
 }
 
 func verifyUserBind(ctx context.Context, cfg *config.Config, dn, password string) error {

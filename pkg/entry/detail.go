@@ -17,6 +17,7 @@ type DetailData struct {
 	Crumbs         []tree.Crumb
 	Attributes     []DetailAttr
 	PasswordScheme string
+	HasPassword    bool
 	EditTemplate   string
 }
 
@@ -74,6 +75,7 @@ func (h *Handler) Detail(w http.ResponseWriter, r *http.Request) {
 			// phpLDAPadmin's convention of not echoing password values.
 			data.Attributes = append(data.Attributes, DetailAttr{Name: a.Name, Values: []string{"[redacted]"}})
 			data.PasswordScheme = tplengine.DetectScheme(a.Values[0])
+			data.HasPassword = true
 			continue
 		}
 		if strings.EqualFold(a.Name, "jpegPhoto") {

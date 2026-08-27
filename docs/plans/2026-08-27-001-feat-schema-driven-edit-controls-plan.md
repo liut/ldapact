@@ -91,6 +91,12 @@ hardcoded name list instead of the schema's USAGE declaration.
   entry; ABSTRACT classes are neither addable nor removable. ObjectClass
   changes flow through review → apply as a full-set Replace like any other
   attribute.
+- R13. Leaf-only deletion: an entry that has children cannot be deleted —
+  the delete confirmation shows the child count and blocks deletion (no
+  recursive delete, no typed-DN bypass); children must be removed first.
+- R14. Password-change gating: the "Change password" affordance (detail-page
+  action, edit-form password row, and the `/password` route itself) is only
+  available when the entry actually has a `userPassword` attribute.
 
 **Origin actors:** A1 (LDAP admin).
 **Origin flows:** F-Detail (edit gateway), F3 (password — unchanged).
@@ -271,6 +277,8 @@ flowchart TB
     U6 --> U5[U5 Add/remove attribute surface]
     U2 --> U7[U7 Binary upload replace]
     U1 --> U9[U9 ObjectClass add/remove]
+    U10[U10 Leaf-only delete] --> U8
+    U11[U11 Password-change gating] --> U8
     U5 --> U8[U8 Follow-up integration + docs]
     U6 --> U8
     U7 --> U8
@@ -715,6 +723,95 @@ review → apply flow.
 **Verification:**
 - Add/remove unit tests + an integration add/remove round trip pass; the
   objectClass diff appears on the review page; `make test` green.
+
+---
+
+### U10. Leaf-only delete
+
+**Goal:** Enforce that entries with children cannot be deleted — delete is
+leaf-only.
+
+**Requirements:** R13
+
+**Dependencies:** None (delete flow is independent of the edit-form units)
+
+**Files:**
+- Modify: `pkg/entry/delete.go`
+- Modify: `pkg/web/templates/delete-confirm-content.html`
+- Test: `pkg/entry/entry_test.go`, `pkg/entry/integration_test.go`,
+  `test/integration/flows_test.go`
+
+**Approach:**
+- `DeleteForm`/`DeleteSubmit`: when the entry has children (`childCount > 0`),
+  render the confirmation page in a blocked state — child count shown, no
+  delete actions, message that children must be deleted first; `Delete` is
+  never called.
+- Remove the recursive-delete path (`recursiveDelete`, `MaxRecursiveDelete`,
+  depth sorters) and the typed-DN bypass for non-leaf entries; leaf deletion
+  keeps its existing confirmation contract.
+- Update the delete confirmation template to drop the recursive checkbox and
+  the typed-DN input when blocked (or entirely, since non-leaf delete is now
+  impossible).
+
+**Patterns to follow:**
+- Existing `childCount` search; confirmation-page error/notice rendering.
+
+**Test scenarios:**
+- Happy path: leaf entry delete still works (no children → Delete called).
+- Edge case: entry with children renders the blocked state with the child
+  count and `Delete` is not called, regardless of `recursive`/`confirm_dn`
+  values (no bypass).
+- Edge case: a crafted POST for a non-leaf entry with `recursive=1` is still
+  blocked.
+- Integration: F5 flow (leaf delete) stays green; a non-leaf delete attempt
+  returns the blocked page.
+
+**Verification:**
+- Delete unit tests updated and passing; non-leaf delete is blocked end to
+  end; `make test` green.
+
+---
+
+### U11. Password-change gating
+
+**Goal:** Surface the password-change affordance only when the entry has a
+`userPassword` attribute.
+
+**Requirements:** R14
+
+**Dependencies:** None
+
+**Files:**
+- Modify: `pkg/entry/detail.go` (`DetailData` gains `HasPassword`)
+- Modify: `pkg/web/templates/entry-detail-content.html` (conditional action)
+- Modify: `pkg/entry/password.go` (`PasswordForm`/`PasswordChange` gate on
+  `userPassword` presence)
+- Test: `pkg/entry/entry_test.go`
+
+**Approach:**
+- `DetailData` gains `HasPassword` (set when the entry has ≥1 userPassword
+  value); the detail-page actions list renders "Change password" only then.
+- `PasswordForm` returns the not-found/message state when the entry has no
+  `userPassword`; `PasswordChange` rejects with the same state before any
+  modify.
+- The edit form's password row is already gated (only rendered when
+  `userPassword` exists) — no change needed there.
+
+**Patterns to follow:**
+- `currentScheme` entry fetch; existing `dnError`/not-found handling.
+
+**Test scenarios:**
+- Happy path: detail page for an entry with `userPassword` shows the Change
+  password action (existing behavior kept).
+- Edge case: detail page for an entry without `userPassword` hides the
+  action.
+- Edge case: direct `GET /password` and `POST /password` for an entry without
+  `userPassword` are rejected (no modify attempted).
+- Edge case: an entry with an empty-valued `userPassword` counts as absent.
+
+**Verification:**
+- Detail rendering + password-route gating tests pass; F3 flow for entries
+  with passwords stays green.
 
 ---
 

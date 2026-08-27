@@ -115,6 +115,7 @@ func seed() {
 			"uidNumber":     {fmt.Sprintf("%d", 2000+i)},
 			"gidNumber":     {"100"},
 			"homeDirectory": {"/home/" + uid},
+			"userPassword":  {"Seed#2026"},
 		}); err != nil {
 			panic(fmt.Sprintf("seed user %s: %v", uid, err))
 		}

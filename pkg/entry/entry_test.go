@@ -457,41 +457,42 @@ func TestDeleteLeaf(t *testing.T) {
 	}
 }
 
-func TestDeleteNonLeafRequiresTypedDN(t *testing.T) {
+func TestDeleteNonLeafBlocked(t *testing.T) {
+	var deleted bool
 	fake := &fakeClient{
 		baseDN: "dc=example,dc=com",
 		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
 			return &ldap.SearchResult{Entries: []*ldap.Entry{{DN: "cn=child,ou=People,dc=example,dc=com"}}}, nil
 		},
+		deleteFn: func(ctx context.Context, dn string) error {
+			deleted = true
+			return nil
+		},
 	}
 	h := testHandler(t, fake)
-	form := url.Values{"confirm_dn": {"wrong-dn"}}
+	form := url.Values{"confirm_dn": {"ou=People,dc=example,dc=com"}}
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/entry/ou=People,dc=example,dc=com/delete", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "ou=People,dc=example,dc=com")
 	h.DeleteSubmit(rr, req)
-	if !strings.Contains(rr.Body.String(), "typing the full DN") {
-		t.Errorf("confirmation feedback: %s", rr.Body.String())
+	if !strings.Contains(rr.Body.String(), "delete them first") {
+		t.Errorf("blocked feedback: %s", rr.Body.String())
+	}
+	if deleted {
+		t.Error("non-leaf entry must not be deleted")
 	}
 }
 
-func TestDeleteRecursive(t *testing.T) {
-	var deleted []string
+func TestDeleteNonLeafRecursiveStillBlocked(t *testing.T) {
+	var deleted bool
 	fake := &fakeClient{
 		baseDN: "dc=example,dc=com",
 		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
-			if req.Scope == ldap.ScopeSingleLevel {
-				return &ldap.SearchResult{Entries: []*ldap.Entry{{DN: "ou=Child,ou=People,dc=example,dc=com"}}}, nil
-			}
-			return &ldap.SearchResult{Entries: []*ldap.Entry{
-				{DN: "ou=People,dc=example,dc=com"},
-				{DN: "ou=Child,ou=People,dc=example,dc=com"},
-				{DN: "cn=grand,ou=Child,ou=People,dc=example,dc=com"},
-			}}, nil
+			return &ldap.SearchResult{Entries: []*ldap.Entry{{DN: "ou=Child,ou=People,dc=example,dc=com"}}}, nil
 		},
 		deleteFn: func(ctx context.Context, dn string) error {
-			deleted = append(deleted, dn)
+			deleted = true
 			return nil
 		},
 	}
@@ -502,9 +503,11 @@ func TestDeleteRecursive(t *testing.T) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "ou=People,dc=example,dc=com")
 	h.DeleteSubmit(rr, req)
-	// Deepest first: grand, child, root.
-	if len(deleted) != 3 || deleted[0] != "cn=grand,ou=Child,ou=People,dc=example,dc=com" || deleted[2] != "ou=People,dc=example,dc=com" {
-		t.Errorf("delete order = %v", deleted)
+	if !strings.Contains(rr.Body.String(), "delete them first") {
+		t.Errorf("blocked feedback: %s", rr.Body.String())
+	}
+	if deleted {
+		t.Error("recursive delete must not bypass the leaf-only rule")
 	}
 }
 
@@ -735,6 +738,75 @@ func TestEditFormNotFound(t *testing.T) {
 	h.EditForm(rr, req)
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("code = %d, want 404", rr.Code)
+	}
+}
+
+func TestDetailPasswordActionGated(t *testing.T) {
+	cases := []struct {
+		name    string
+		entry   *ldap.Entry
+		visible bool
+	}{
+		{"with password", inetOrgPersonEntry(), true},
+		{"without password", genericOUEntry(), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &fakeClient{
+				baseDN: "dc=example,dc=com",
+				searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+					return &ldap.SearchResult{Entries: []*ldap.Entry{tc.entry}}, nil
+				},
+			}
+			h := testHandler(t, fake)
+			rr := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/api/entry/"+tc.entry.DN, nil)
+			req.SetPathValue("dn", tc.entry.DN)
+			h.Detail(rr, req)
+			body := rr.Body.String()
+			if tc.visible && !strings.Contains(body, "Change password") {
+				t.Error("detail page with userPassword must show Change password")
+			}
+			if !tc.visible && strings.Contains(body, "Change password") {
+				t.Error("detail page without userPassword must hide Change password")
+			}
+		})
+	}
+}
+
+func TestPasswordRouteGated(t *testing.T) {
+	var modified bool
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{genericOUEntry()}}, nil
+		},
+		modifyFn: func(ctx context.Context, dn string, changes []ldap.Change) error {
+			modified = true
+			return nil
+		},
+	}
+	h := testHandler(t, fake)
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/entry/ou=People,dc=example,dc=com/password", nil)
+	req.SetPathValue("dn", "ou=People,dc=example,dc=com")
+	h.PasswordForm(rr, req)
+	if !strings.Contains(rr.Body.String(), "no userPassword") {
+		t.Errorf("password form must gate: %s", rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/entry/ou=People,dc=example,dc=com/password",
+		strings.NewReader(url.Values{"new_password": {"x"}, "confirm_password": {"x"}}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("dn", "ou=People,dc=example,dc=com")
+	h.PasswordChange(rr, req)
+	if !strings.Contains(rr.Body.String(), "no userPassword") {
+		t.Errorf("password change must gate: %s", rr.Body.String())
+	}
+	if modified {
+		t.Error("password modify must not run for an entry without userPassword")
 	}
 }
 
