@@ -87,6 +87,30 @@ func (s *Schema) EffectiveMay(objectClasses []string) []string {
 	return s.effectiveAttrs(objectClasses, func(oc *ObjectClass) []string { return oc.May })
 }
 
+// AuxiliaryClasses returns the names of all AUXILIARY objectClasses in the
+// schema, sorted. Used by the edit form's objectClass add picker (R12).
+func (s *Schema) AuxiliaryClasses() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []string
+	for _, oc := range s.ObjectClasses {
+		if oc.Kind == "AUXILIARY" {
+			out = append(out, oc.Name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// ClassAttributes returns the effective MUST ∪ MAY attribute names for one
+// objectClass (SUP-resolved), deduplicated and sorted. Drives the
+// "has values" check that gates objectClass removal (R12).
+func (s *Schema) ClassAttributes(name string) []string {
+	return s.effectiveAttrs([]string{name}, func(oc *ObjectClass) []string {
+		return append(append([]string{}, oc.Must...), oc.May...)
+	})
+}
+
 // effectiveAttrs walks each objectClass and its SUP chain, collecting the
 // selected attribute list. Unknown classes are skipped best-effort; a visited
 // set guards against malformed SUP cycles.

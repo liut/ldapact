@@ -42,8 +42,16 @@ type EditFormData struct {
 	TemplateTitle string
 	Attributes    []FormField
 	AddCandidates []tplengine.Value
+	ObjectClasses ObjectClassField
 	Errors        map[string]string
 	Crumbs        []tree.Crumb
+}
+
+// ObjectClassField drives the edit form's objectClass section (R12).
+type ObjectClassField struct {
+	Current   []string
+	Removable map[string]bool
+	Addable   []string
 }
 
 // EditConfirmData drives the old→new review page (phpLDAPadmin
@@ -132,11 +140,6 @@ func (h *Handler) EditSubmit(w http.ResponseWriter, r *http.Request) {
 	// Stateless round trip: attributes added via add_attr travel through the
 	// review/apply hidden inputs; re-derive them from the submitted form.
 	fields = h.mergeSubmittedFields(e, fields, submittedValues(r))
-	changes := buildChanges(e, fields)
-	if errMsg := h.validateChanges(e, fields, changes); errMsg != "" {
-		h.renderEditForm(w, r, e, fields, tmpl, map[string]string{"_form": errMsg})
-		return
-	}
 	if add := strings.TrimSpace(r.FormValue("add_attr")); add != "" {
 		if h.validAddCandidate(e, fields, add) {
 			fields = append(fields, h.addedEditField(e, add, submittedValues(r)))
@@ -146,6 +149,27 @@ func (h *Handler) EditSubmit(w http.ResponseWriter, r *http.Request) {
 				"_form": fmt.Sprintf("Cannot add attribute %q — not in this entry's objectClass schema.", add),
 			})
 		}
+		return
+	}
+	if oc := strings.TrimSpace(r.FormValue("add_oc")); oc != "" {
+		if errMsg := h.objectClassChange(e, fields, "add", oc); errMsg != "" {
+			h.renderEditForm(w, r, e, fields, tmpl, map[string]string{"_form": errMsg})
+			return
+		}
+		h.renderEditForm(w, r, e, fields, tmpl, nil)
+		return
+	}
+	if oc := strings.TrimSpace(r.FormValue("remove_oc")); oc != "" {
+		if errMsg := h.objectClassChange(e, fields, "remove", oc); errMsg != "" {
+			h.renderEditForm(w, r, e, fields, tmpl, map[string]string{"_form": errMsg})
+			return
+		}
+		h.renderEditForm(w, r, e, fields, tmpl, nil)
+		return
+	}
+	changes := buildChanges(e, fields)
+	if errMsg := h.validateChanges(e, fields, changes); errMsg != "" {
+		h.renderEditForm(w, r, e, fields, tmpl, map[string]string{"_form": errMsg})
 		return
 	}
 	switch r.FormValue("stage") {
@@ -263,7 +287,7 @@ func (h *Handler) buildEditModel(r *http.Request, e *ldap.Entry, submitted map[s
 	} else {
 		fields = h.genericEditFields(e, submitted, required)
 	}
-	fields = append([]editFieldModel{objectClassField(e)}, fields...)
+	fields = append([]editFieldModel{objectClassModel(h.objectClassSet(e, submitted))}, fields...)
 	if len(e.GetAttributeValues("userPassword")) > 0 {
 		fields = append(fields, passwordField())
 	}
@@ -412,7 +436,7 @@ func (h *Handler) genericEditFields(e *ldap.Entry, submitted map[string][]string
 func buildChanges(e *ldap.Entry, fields []editFieldModel) []ldap.Change {
 	var changes []ldap.Change
 	for _, f := range fields {
-		if f.readonly || f.redacted || f.id == "objectClass" || f.id == "userPassword" {
+		if f.readonly || f.redacted || f.id == "userPassword" {
 			continue
 		}
 		oldVals := cleanValues(e.GetAttributeValues(f.id))
@@ -437,6 +461,11 @@ func buildChanges(e *ldap.Entry, fields []editFieldModel) []ldap.Change {
 // Returns a user-facing error message, or "" when the change set is valid.
 func (h *Handler) validateChanges(e *ldap.Entry, fields []editFieldModel, changes []ldap.Change) string {
 	for _, c := range changes {
+		if strings.EqualFold(c.Modification.Type, "objectClass") {
+			if errMsg := h.validateObjectClassSet(e, c.Modification.Vals); errMsg != "" {
+				return errMsg
+			}
+		}
 		if c.Operation != uint(ldap.DeleteAttribute) {
 			continue
 		}
@@ -474,6 +503,7 @@ func (h *Handler) renderEditForm(w http.ResponseWriter, r *http.Request, e *ldap
 		TemplateTitle: title,
 		Attributes:    attrs,
 		AddCandidates: h.attributeCandidates(e, fields),
+		ObjectClasses: h.objectClassSection(e, fields),
 		Errors:        errs,
 		Crumbs:        tree.Breadcrumbs(e.DN, h.client.BaseDN(), 5),
 	})
@@ -487,7 +517,7 @@ func (h *Handler) renderEditConfirm(w http.ResponseWriter, r *http.Request, e *l
 	var rows []EditDiffRow
 	var hidden []EditHiddenField
 	for _, f := range fields {
-		if f.readonly || f.redacted || f.id == "objectClass" || f.id == "userPassword" {
+		if f.readonly || f.redacted || f.id == "userPassword" {
 			continue
 		}
 		oldVals := cleanValues(e.GetAttributeValues(f.id))
@@ -725,16 +755,195 @@ func schemaDisplayName(schema *ldapx.Schema, name string) string {
 	return name
 }
 
-func objectClassField(e *ldap.Entry) editFieldModel {
+// objectClassModel is the edit model for the entry's objectClass set (R12).
+// It is rendered by the dedicated objectClass section, not form-field.html.
+func objectClassModel(classes []string) editFieldModel {
 	return editFieldModel{
-		id:       "objectClass",
-		display:  "Object classes",
-		kind:     "text",
-		multi:    true,
-		readonly: true,
-		values:   e.GetAttributeValues("objectClass"),
-		hint:     "Object classes cannot be changed in this flow.",
+		id:      "objectClass",
+		display: "Object classes",
+		kind:    "objectclass",
+		multi:   true,
+		values:  classes,
 	}
+}
+
+// objectClassSet returns the entry's objectClass values, or the submitted
+// set when a POST round trip (hidden inputs) is in flight.
+func (h *Handler) objectClassSet(e *ldap.Entry, submitted map[string][]string) []string {
+	if submitted != nil {
+		if vs, ok := submitted["objectclass"]; ok {
+			return cleanValues(vs)
+		}
+	}
+	return cleanValues(e.GetAttributeValues("objectClass"))
+}
+
+// objectClassSection computes the editable objectClass section: current
+// classes, which auxiliary classes are removable (no contributing values),
+// and which auxiliary classes can be added.
+func (h *Handler) objectClassSection(e *ldap.Entry, fields []editFieldModel) ObjectClassField {
+	sec := ObjectClassField{Removable: map[string]bool{}}
+	for _, f := range fields {
+		if f.id == "objectClass" {
+			sec.Current = f.values
+			break
+		}
+	}
+	schema := h.client.Schema()
+	if schema == nil {
+		return sec
+	}
+	present := map[string]bool{}
+	for _, c := range sec.Current {
+		present[c] = true
+	}
+	for _, c := range sec.Current {
+		if oc, ok := schema.ObjectClass(c); ok && oc.Kind == "AUXILIARY" && h.objectClassRemovable(e, c) {
+			sec.Removable[c] = true
+		}
+	}
+	for _, a := range schema.AuxiliaryClasses() {
+		if !present[a] {
+			sec.Addable = append(sec.Addable, a)
+		}
+	}
+	return sec
+}
+
+// objectClassChange applies an incremental add/remove to the objectClass
+// field in place, validating against the R12 rules. Returns "" on success or
+// a user-facing error.
+func (h *Handler) objectClassChange(e *ldap.Entry, fields []editFieldModel, op, name string) string {
+	schema := h.client.Schema()
+	if schema == nil {
+		return "Schema unavailable — object classes cannot be changed."
+	}
+	idx := -1
+	for i := range fields {
+		if fields[i].id == "objectClass" {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return "objectClass field missing."
+	}
+	switch op {
+	case "add":
+		oc, ok := schema.ObjectClass(name)
+		if !ok || oc.Kind != "AUXILIARY" {
+			return fmt.Sprintf("Cannot add object class %q — only schema AUXILIARY classes can be added.", name)
+		}
+		for _, c := range fields[idx].values {
+			if strings.EqualFold(c, name) {
+				return fmt.Sprintf("Object class %q is already present.", name)
+			}
+		}
+		fields[idx].values = append(fields[idx].values, oc.Name)
+	case "remove":
+		oc, ok := schema.ObjectClass(name)
+		if !ok {
+			return fmt.Sprintf("Cannot remove object class %q — unknown in schema.", name)
+		}
+		found := false
+		for _, c := range fields[idx].values {
+			if strings.EqualFold(c, name) {
+				found = true
+			}
+		}
+		if !found {
+			return fmt.Sprintf("Object class %q is not present.", name)
+		}
+		if oc.Kind != "AUXILIARY" {
+			return fmt.Sprintf("Object class %q cannot be removed — only AUXILIARY classes can be removed.", name)
+		}
+		if !h.objectClassRemovable(e, oc.Name) {
+			return fmt.Sprintf("Object class %q cannot be removed — its attributes have values on this entry.", name)
+		}
+		var out []string
+		for _, c := range fields[idx].values {
+			if !strings.EqualFold(c, name) {
+				out = append(out, c)
+			}
+		}
+		fields[idx].values = out
+	default:
+		return "unknown object class operation"
+	}
+	return ""
+}
+
+// objectClassRemovable reports whether the objectClass can be removed without
+// orphaning attribute values: it is AUXILIARY (checked by callers) and no
+// attribute value on the entry depends exclusively on it — i.e. none of its
+// effective attributes (minus those shared with the entry's other
+// objectClasses) currently hold values (R12).
+func (h *Handler) objectClassRemovable(e *ldap.Entry, ocName string) bool {
+	schema := h.client.Schema()
+	if schema == nil {
+		return false
+	}
+	shared := map[string]bool{}
+	for _, c := range e.GetAttributeValues("objectClass") {
+		if strings.EqualFold(c, ocName) {
+			continue
+		}
+		for _, a := range schema.ClassAttributes(c) {
+			shared[strings.ToLower(a)] = true
+		}
+	}
+	for _, attr := range schema.ClassAttributes(ocName) {
+		if shared[strings.ToLower(attr)] {
+			continue
+		}
+		if len(e.GetAttributeValues(attr)) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// validateObjectClassSet validates a submitted objectClass value set against
+// the R12 rules: removals must be AUXILIARY and value-less, additions must be
+// AUXILIARY. Protects the review → apply round trip from tampering.
+func (h *Handler) validateObjectClassSet(e *ldap.Entry, newSet []string) string {
+	schema := h.client.Schema()
+	if schema == nil {
+		return ""
+	}
+	entryClasses := map[string]bool{}
+	for _, c := range cleanValues(e.GetAttributeValues("objectClass")) {
+		entryClasses[c] = true
+	}
+	newClasses := map[string]bool{}
+	for _, c := range cleanValues(newSet) {
+		newClasses[c] = true
+	}
+	for c := range entryClasses {
+		if newClasses[c] {
+			continue
+		}
+		oc, ok := schema.ObjectClass(c)
+		if !ok {
+			continue
+		}
+		if oc.Kind != "AUXILIARY" {
+			return fmt.Sprintf("Object class %q cannot be removed — only AUXILIARY classes can be removed.", c)
+		}
+		if !h.objectClassRemovable(e, c) {
+			return fmt.Sprintf("Object class %q cannot be removed — its attributes have values on this entry.", c)
+		}
+	}
+	for c := range newClasses {
+		if entryClasses[c] {
+			continue
+		}
+		oc, ok := schema.ObjectClass(c)
+		if !ok || oc.Kind != "AUXILIARY" {
+			return fmt.Sprintf("Object class %q cannot be added — only schema AUXILIARY classes can be added.", c)
+		}
+	}
+	return ""
 }
 
 func passwordField() editFieldModel {

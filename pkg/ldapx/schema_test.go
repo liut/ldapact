@@ -106,6 +106,7 @@ func controlSchemaEntry() *ldap.Entry {
 				"( 2.5.6.6 NAME 'person' DESC 'RFC2256: a person' SUP top STRUCTURAL MUST ( sn $ cn ) MAY ( userPassword $ telephoneNumber $ seeAlso $ description ) )",
 				"( 2.5.6.7 NAME 'organizationalPerson' SUP person STRUCTURAL MAY ( postalAddress $ l $ st ) )",
 				"( 2.16.840.1.113730.3.2.2 NAME 'inetOrgPerson' SUP organizationalPerson STRUCTURAL MAY ( mail $ uid $ userCertificate ) )",
+				"( 1.3.6.1.1.1.2.0 NAME 'posixAccount' SUP top AUXILIARY MUST ( cn $ uid $ uidNumber $ gidNumber $ homeDirectory ) MAY ( userPassword $ loginShell $ gecos $ description ) )",
 			}},
 			{Name: "attributeTypes", Values: []string{
 				"( 2.5.4.3 NAME ( 'cn' 'commonName' ) SUP name SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 )",
@@ -234,6 +235,33 @@ func TestEffectiveMustMay(t *testing.T) {
 		if a == "rfc822Mailbox" || a == "userid" {
 			t.Errorf("alias leaked into MAY: %q", a)
 		}
+	}
+}
+
+func TestAuxiliaryClasses(t *testing.T) {
+	s, err := ParseSchema(controlSchemaEntry())
+	if err != nil {
+		t.Fatalf("ParseSchema: %v", err)
+	}
+	got := s.AuxiliaryClasses()
+	want := []string{"posixAccount"}
+	if !equalStrings(got, want) {
+		t.Errorf("AuxiliaryClasses = %v, want %v", got, want)
+	}
+}
+
+func TestClassAttributes(t *testing.T) {
+	s, err := ParseSchema(controlSchemaEntry())
+	if err != nil {
+		t.Fatalf("ParseSchema: %v", err)
+	}
+	got := s.ClassAttributes("posixAccount")
+	want := []string{
+		"cn", "description", "gecos", "gidNumber", "homeDirectory",
+		"loginShell", "uid", "uidNumber", "userPassword",
+	}
+	if !equalStrings(got, want) {
+		t.Errorf("ClassAttributes(posixAccount) = %v, want %v", got, want)
 	}
 }
 

@@ -14,7 +14,31 @@
   <form method="post" action="/api/entry/{{.DN | urlquery}}/edit">
     <input type="hidden" name="stage" value="review">
     {{if .TemplateName}}<input type="hidden" name="template" value="{{.TemplateName}}">{{end}}
-    {{range .Attributes}}{{template "form-field.html" .}}{{end}}
+    {{if .ObjectClasses.Current}}
+    <section aria-labelledby="oc-title" class="objectclasses-section">
+      <h2 id="oc-title">Object classes</h2>
+      {{range .ObjectClasses.Current}}
+      <div class="oc-row">
+        <span class="oc-name">{{.}}</span>
+        {{if index $.ObjectClasses.Removable .}}<button type="submit" class="secondary remove-oc" name="remove_oc" value="{{.}}" aria-label="Remove object class {{.}}">Remove</button>{{end}}
+        <input type="hidden" name="objectClass" value="{{.}}">
+      </div>
+      {{end}}
+      {{if .ObjectClasses.Addable}}
+      <div class="form-field">
+        <label for="add-oc">Add object class</label>
+        <p class="field-help" id="help-add-oc">Only AUXILIARY object classes can be added; classes whose attributes have values cannot be removed.</p>
+        <div class="add-row">
+          <select id="add-oc" name="add_oc" aria-describedby="help-add-oc">
+            {{range .ObjectClasses.Addable}}<option value="{{.}}">{{.}}</option>{{end}}
+          </select>
+          <button type="submit" class="secondary" name="add_oc_go" value="1">Add</button>
+        </div>
+      </div>
+      {{end}}
+    </section>
+    {{end}}
+    {{range .Attributes}}{{if ne .Kind "objectclass"}}{{template "form-field.html" .}}{{end}}{{end}}
     {{if .AddCandidates}}
     <div class="form-field add-attribute">
       <label for="add-attr">Add attribute</label>

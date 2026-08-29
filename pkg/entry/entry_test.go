@@ -160,6 +160,7 @@ func controlSchema() *ldapx.Schema {
 				"( 2.5.6.7 NAME 'organizationalPerson' SUP person STRUCTURAL MAY ( postalAddress $ l $ st ) )",
 				"( 2.16.840.1.113730.3.2.2 NAME 'inetOrgPerson' SUP organizationalPerson STRUCTURAL MAY ( mail $ uid $ userCertificate ) )",
 				"( 2.5.6.9 NAME 'groupOfNames' SUP top STRUCTURAL MUST ( cn $ member ) MAY ( owner $ seeAlso $ businessCategory $ o $ ou $ description ) )",
+				"( 1.3.6.1.1.1.2.0 NAME 'posixAccount' SUP top AUXILIARY MUST ( cn $ uid $ uidNumber $ gidNumber $ homeDirectory ) MAY ( userPassword $ loginShell $ gecos $ description ) )",
 			}},
 			{Name: "attributeTypes", Values: []string{
 				"( 2.5.4.3 NAME ( 'cn' 'commonName' ) SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 )",
@@ -1294,6 +1295,276 @@ func TestEditDeleteAttributeButton(t *testing.T) {
 	if strings.Contains(body, `class="delete-attr" data-name="sn"`) {
 		t.Error("MUST attribute must not render a Delete attribute button")
 	}
+}
+
+func posixAccountEntry() *ldap.Entry {
+	return &ldap.Entry{
+		DN: "uid=carol,ou=People,dc=example,dc=com",
+		Attributes: []*ldap.EntryAttribute{
+			{Name: "objectClass", Values: []string{"top", "person", "posixAccount"}},
+			{Name: "cn", Values: []string{"carol"}},
+			{Name: "sn", Values: []string{"Davis"}},
+			{Name: "uidNumber", Values: []string{"2001"}},
+			{Name: "uid", Values: []string{"carol"}},
+			{Name: "gidNumber", Values: []string{"100"}},
+			{Name: "homeDirectory", Values: []string{"/home/carol"}},
+		},
+	}
+}
+
+func TestEditFormObjectClassSection(t *testing.T) {
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		schema: controlSchema(),
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{schemaControlsEntry()}}, nil
+		},
+	}
+	h := testHandler(t, fake)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", nil)
+	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
+	h.EditForm(rr, req)
+	body := rr.Body.String()
+	if !strings.Contains(body, `name="add_oc"`) || !strings.Contains(body, `value="posixAccount"`) {
+		t.Error("auxiliary add picker must list posixAccount")
+	}
+	if strings.Contains(body, `name="remove_oc"`) {
+		t.Error("no auxiliary class should be removable on a plain person entry")
+	}
+}
+
+func TestEditObjectClassRemoveBlockedByValues(t *testing.T) {
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		schema: controlSchema(),
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{posixAccountEntry()}}, nil
+		},
+	}
+	h := testHandler(t, fake)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/entry/uid=carol,ou=People,dc=example,dc=com/edit", nil)
+	req.SetPathValue("dn", "uid=carol,ou=People,dc=example,dc=com")
+	h.EditForm(rr, req)
+	body := rr.Body.String()
+	if !strings.Contains(body, `oc-name">posixAccount`) {
+		t.Error("posixAccount must appear in the object class list")
+	}
+	if strings.Contains(body, `name="remove_oc" value="posixAccount"`) {
+		t.Error("posixAccount with own values must not be removable")
+	}
+}
+
+func TestEditObjectClassAdd(t *testing.T) {
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		schema: controlSchema(),
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{schemaControlsEntry()}}, nil
+		},
+	}
+	h := testHandler(t, fake)
+	form := url.Values{
+		"booleanAttr":   {"TRUE"},
+		"dnAttr":        {"cn=manager,ou=People,dc=example,dc=com"},
+		"postalAddress": {"123 Main St\nSpringfield"},
+		"sn":            {"Davis"},
+		"objectClass":   {"top", "person"},
+		"add_oc":        {"posixAccount"},
+		"stage":         {"review"},
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
+	h.EditSubmit(rr, req)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `oc-name">posixAccount`) {
+		t.Fatalf("add_oc must re-render with posixAccount listed: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestEditObjectClassAddStructuralRejected(t *testing.T) {
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		schema: controlSchema(),
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{schemaControlsEntry()}}, nil
+		},
+	}
+	h := testHandler(t, fake)
+	form := url.Values{
+		"booleanAttr":   {"TRUE"},
+		"dnAttr":        {"cn=manager,ou=People,dc=example,dc=com"},
+		"postalAddress": {"123 Main St\nSpringfield"},
+		"sn":            {"Davis"},
+		"objectClass":   {"top", "person"},
+		"add_oc":        {"inetOrgPerson"},
+		"stage":         {"review"},
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
+	h.EditSubmit(rr, req)
+	if !strings.Contains(rr.Body.String(), "AUXILIARY classes can be added") {
+		t.Errorf("structural add must be rejected: %s", rr.Body.String())
+	}
+}
+
+func TestEditObjectClassRemove(t *testing.T) {
+	entry := posixAccountEntry()
+	// Strip the own-only values so posixAccount becomes removable.
+	entry.Attributes = []*ldap.EntryAttribute{
+		{Name: "objectClass", Values: []string{"top", "person", "posixAccount"}},
+		{Name: "cn", Values: []string{"carol"}},
+		{Name: "sn", Values: []string{"Davis"}},
+	}
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		schema: controlSchema(),
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{entry}}, nil
+		},
+	}
+	h := testHandler(t, fake)
+	form := url.Values{
+		"cn":          {"carol"},
+		"sn":          {"Davis"},
+		"objectClass": {"top", "person", "posixAccount"},
+		"remove_oc":   {"posixAccount"},
+		"stage":       {"review"},
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/entry/uid=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("dn", "uid=carol,ou=People,dc=example,dc=com")
+	h.EditSubmit(rr, req)
+	body := rr.Body.String()
+	if strings.Contains(body, `oc-name">posixAccount`) ||
+		strings.Contains(body, "cannot be removed — its attributes") {
+		t.Errorf("value-less posixAccount must be removable: %s", body)
+	}
+}
+
+func TestEditObjectClassRemoveWithValuesRejected(t *testing.T) {
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		schema: controlSchema(),
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{posixAccountEntry()}}, nil
+		},
+	}
+	h := testHandler(t, fake)
+	form := url.Values{
+		"cn":            {"carol"},
+		"sn":            {"Davis"},
+		"uid":           {"carol"},
+		"uidNumber":     {"2001"},
+		"gidNumber":     {"100"},
+		"homeDirectory": {"/home/carol"},
+		"objectClass":   {"top", "person", "posixAccount"},
+		"remove_oc":     {"posixAccount"},
+		"stage":         {"review"},
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/entry/uid=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("dn", "uid=carol,ou=People,dc=example,dc=com")
+	h.EditSubmit(rr, req)
+	if !strings.Contains(rr.Body.String(), "cannot be removed — its attributes") {
+		t.Errorf("posixAccount with own values must be blocked: %s", rr.Body.String())
+	}
+}
+
+func TestEditObjectClassApply(t *testing.T) {
+	var got []ldap.Change
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		schema: controlSchema(),
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{schemaControlsEntry()}}, nil
+		},
+		modifyFn: func(ctx context.Context, dn string, changes []ldap.Change) error {
+			got = changes
+			return nil
+		},
+	}
+	h := testHandler(t, fake)
+	form := url.Values{
+		"booleanAttr":   {"TRUE"},
+		"dnAttr":        {"cn=manager,ou=People,dc=example,dc=com"},
+		"postalAddress": {"123 Main St\nSpringfield"},
+		"sn":            {"Davis"},
+		"objectClass":   {"top", "person", "posixAccount"},
+		"stage":         {"apply"},
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
+	h.EditSubmit(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("code = %d: %s", rr.Code, rr.Body.String())
+	}
+	gotSet := map[string]bool{}
+	for _, c := range got {
+		if c.Modification.Type == "objectClass" && c.Operation == uint(ldap.ReplaceAttribute) {
+			for _, v := range cleanValues(c.Modification.Vals) {
+				gotSet[v] = true
+			}
+		}
+	}
+	if !gotSet["top"] || !gotSet["person"] || !gotSet["posixAccount"] || len(gotSet) != 3 {
+		t.Fatalf("objectClass change must apply via Replace, got %+v", got)
+	}
+}
+
+func TestEditObjectClassApplyStructuralRemovalRejected(t *testing.T) {
+	var modified bool
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		schema: controlSchema(),
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{schemaControlsEntry()}}, nil
+		},
+		modifyFn: func(ctx context.Context, dn string, changes []ldap.Change) error {
+			modified = true
+			return nil
+		},
+	}
+	h := testHandler(t, fake)
+	form := url.Values{
+		"booleanAttr":   {"TRUE"},
+		"dnAttr":        {"cn=manager,ou=People,dc=example,dc=com"},
+		"postalAddress": {"123 Main St\nSpringfield"},
+		"sn":            {"Davis"},
+		"objectClass":   {"top"}, // person (STRUCTURAL) removed
+		"stage":         {"apply"},
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
+	h.EditSubmit(rr, req)
+	if !strings.Contains(rr.Body.String(), "cannot be removed") {
+		t.Errorf("structural removal must be rejected: %s", rr.Body.String())
+	}
+	if modified {
+		t.Error("structural removal must not call Modify")
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestEditRequiredClearRejected(t *testing.T) {

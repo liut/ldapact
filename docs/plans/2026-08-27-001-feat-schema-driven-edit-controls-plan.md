@@ -86,11 +86,12 @@ hardcoded name list instead of the schema's USAGE declaration.
   (server-enforced): STRUCTURAL objectClasses are never removable (and never
   addable — an entry keeps exactly one structural chain); AUXILIARY
   objectClasses can be added (any schema auxiliary class not already present);
-  an objectClass is removable only when it is AUXILIARY **and** none of its
-  effective attributes (MUST ∪ MAY through SUP) currently hold values on the
-  entry; ABSTRACT classes are neither addable nor removable. ObjectClass
-  changes flow through review → apply as a full-set Replace like any other
-  attribute.
+  an objectClass is removable only when it is AUXILIARY **and** no attribute
+  value on the entry depends exclusively on it — i.e. none of its effective
+  attributes (MUST ∪ MAY through SUP, minus the union of the entry's other
+  objectClasses' effective sets) currently hold values; ABSTRACT classes are
+  neither addable nor removable. ObjectClass changes flow through review →
+  apply as a full-set Replace like any other attribute.
 - R13. Leaf-only deletion: an entry that has children cannot be deleted —
   the delete confirmation shows the child count and blocks deletion (no
   recursive delete, no typed-DN bypass); children must be removed first.
