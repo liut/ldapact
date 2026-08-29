@@ -166,6 +166,9 @@ func controlSchema() *ldapx.Schema {
 				"( 2.5.4.4 NAME ( 'sn' 'surname' ) SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 )",
 				"( 0.9.2342.19200300.100.1.3 NAME ( 'mail' 'rfc822Mailbox' ) SYNTAX 1.3.6.1.4.1.1466.115.121.1.26 )",
 				"( 2.5.4.16 NAME 'postalAddress' SYNTAX 1.3.6.1.4.1.1466.115.121.1.41 )",
+				"( 2.5.4.20 NAME 'telephoneNumber' EQUALITY telephoneNumberMatch SUBSTR telephoneNumberSubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.50 )",
+				"( 2.5.4.13 NAME 'description' EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 )",
+				"( 2.5.4.34 NAME 'seeAlso' EQUALITY distinguishedNameMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.12 )",
 				"( 2.5.4.5 NAME 'booleanAttr' SYNTAX 1.3.6.1.4.1.1466.115.121.1.7 SINGLE-VALUE )",
 				"( 2.5.4.49 NAME 'dnAttr' SYNTAX 1.3.6.1.4.1.1466.115.121.1.12 )",
 				"( 2.5.4.36 NAME 'certificateAttr' SYNTAX 1.3.6.1.4.1.1466.115.121.1.8 )",
@@ -1135,6 +1138,161 @@ func TestMergeOptionsNotSet(t *testing.T) {
 	requiredSet := mergeOptions([]string{"b"}, []tplengine.Value{{ID: "a", Display: "A"}, {ID: "b", Display: "B"}}, true)
 	if len(requiredSet) != 2 || requiredSet[0].ID != "b" {
 		t.Errorf("mergeOptions(MUST, set) must have no (not set): %+v", requiredSet)
+	}
+}
+
+func TestEditFormAddCandidates(t *testing.T) {
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		schema: controlSchema(),
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{schemaControlsEntry()}}, nil
+		},
+	}
+	h := testHandler(t, fake)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", nil)
+	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
+	h.EditForm(rr, req)
+	body := rr.Body.String()
+	for _, want := range []string{`name="add_attr"`, `value="telephoneNumber"`, `value="description"`, `value="seeAlso"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("add-attribute candidates missing %q", want)
+		}
+	}
+	for _, not := range []string{`value="sn"`, `value="userPassword"`, `value="operationalAttr"`} {
+		if strings.Contains(body, not) {
+			t.Errorf("add-attribute candidates must not contain %q", not)
+		}
+	}
+}
+
+func TestEditAddAttribute(t *testing.T) {
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		schema: controlSchema(),
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{schemaControlsEntry()}}, nil
+		},
+	}
+	h := testHandler(t, fake)
+	form := url.Values{
+		"booleanAttr":   {"TRUE"},
+		"dnAttr":        {"cn=manager,ou=People,dc=example,dc=com"},
+		"postalAddress": {"123 Main St\nSpringfield"},
+		"sn":            {"Davis"},
+		"add_attr":      {"telephoneNumber"},
+		"stage":         {"review"},
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
+	h.EditSubmit(rr, req)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `name="telephoneNumber"`) {
+		t.Fatalf("add_attr must re-render with the new field: %d %s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "Apply changes") {
+		t.Error("adding an attribute must not proceed to review")
+	}
+}
+
+func TestEditAddAttributeApply(t *testing.T) {
+	var got []ldap.Change
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		schema: controlSchema(),
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{schemaControlsEntry()}}, nil
+		},
+		modifyFn: func(ctx context.Context, dn string, changes []ldap.Change) error {
+			got = changes
+			return nil
+		},
+	}
+	h := testHandler(t, fake)
+	form := url.Values{
+		"booleanAttr":     {"TRUE"},
+		"dnAttr":          {"cn=manager,ou=People,dc=example,dc=com"},
+		"postalAddress":   {"123 Main St\nSpringfield"},
+		"sn":              {"Davis"},
+		"telephoneNumber": {"+1 555 0100"},
+		"stage":           {"apply"},
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
+	h.EditSubmit(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("code = %d: %s", rr.Code, rr.Body.String())
+	}
+	found := false
+	for _, c := range got {
+		if c.Modification.Type == "telephoneNumber" && c.Operation == uint(ldap.ReplaceAttribute) &&
+			len(c.Modification.Vals) == 1 && c.Modification.Vals[0] == "+1 555 0100" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("added attribute must be created via Replace, got %+v", got)
+	}
+}
+
+func TestEditAddAttributeInvalid(t *testing.T) {
+	var modified bool
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		schema: controlSchema(),
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{schemaControlsEntry()}}, nil
+		},
+		modifyFn: func(ctx context.Context, dn string, changes []ldap.Change) error {
+			modified = true
+			return nil
+		},
+	}
+	h := testHandler(t, fake)
+	form := url.Values{
+		"booleanAttr":   {"TRUE"},
+		"dnAttr":        {"cn=manager,ou=People,dc=example,dc=com"},
+		"postalAddress": {"123 Main St\nSpringfield"},
+		"sn":            {"Davis"},
+		"add_attr":      {"operationalAttr"},
+		"stage":         {"review"},
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
+	h.EditSubmit(rr, req)
+	if !strings.Contains(rr.Body.String(), "Cannot add attribute") || strings.Contains(rr.Body.String(), `name="operationalAttr"`) {
+		t.Errorf("invalid add_attr must be rejected: %s", rr.Body.String())
+	}
+	if modified {
+		t.Error("invalid add must not call Modify")
+	}
+}
+
+func TestEditDeleteAttributeButton(t *testing.T) {
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		schema: controlSchema(),
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{schemaControlsEntry()}}, nil
+		},
+	}
+	h := testHandler(t, fake)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", nil)
+	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
+	h.EditForm(rr, req)
+	body := rr.Body.String()
+	if !strings.Contains(body, `class="delete-attr" data-name="postalAddress"`) {
+		t.Error("MAY attribute must render a Delete attribute button")
+	}
+	if strings.Contains(body, `class="delete-attr" data-name="sn"`) {
+		t.Error("MUST attribute must not render a Delete attribute button")
 	}
 }
 

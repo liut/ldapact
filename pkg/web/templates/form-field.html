@@ -43,6 +43,7 @@
   {{if .NoMatches}}<p class="notice">未找到候选</p>{{end}}
   {{if .MaxHit}}<p class="notice" role="alert">{{.Notice}}</p>{{end}}
   {{if .Error}}<p class="field-error" id="err-{{.ID}}" role="alert">{{.Error}}</p>{{end}}
+  {{if and (not .Readonly) (not .Redacted) (not .SchemaRequired)}}<button type="button" class="delete-attr" data-name="{{.ID}}" aria-label="Delete the {{.Display}} attribute">Delete attribute</button>{{end}}
   {{end}}
 </div>
 {{end}}

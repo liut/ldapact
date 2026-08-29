@@ -41,6 +41,7 @@ type EditFormData struct {
 	TemplateName  string
 	TemplateTitle string
 	Attributes    []FormField
+	AddCandidates []tplengine.Value
 	Errors        map[string]string
 	Crumbs        []tree.Crumb
 }
@@ -128,9 +129,23 @@ func (h *Handler) EditSubmit(w http.ResponseWriter, r *http.Request) {
 		h.editTemplateError(w, r, err)
 		return
 	}
+	// Stateless round trip: attributes added via add_attr travel through the
+	// review/apply hidden inputs; re-derive them from the submitted form.
+	fields = h.mergeSubmittedFields(e, fields, submittedValues(r))
 	changes := buildChanges(e, fields)
 	if errMsg := h.validateChanges(e, fields, changes); errMsg != "" {
 		h.renderEditForm(w, r, e, fields, tmpl, map[string]string{"_form": errMsg})
+		return
+	}
+	if add := strings.TrimSpace(r.FormValue("add_attr")); add != "" {
+		if h.validAddCandidate(e, fields, add) {
+			fields = append(fields, h.addedEditField(e, add, submittedValues(r)))
+			h.renderEditForm(w, r, e, fields, tmpl, nil)
+		} else {
+			h.renderEditForm(w, r, e, fields, tmpl, map[string]string{
+				"_form": fmt.Sprintf("Cannot add attribute %q — not in this entry's objectClass schema.", add),
+			})
+		}
 		return
 	}
 	switch r.FormValue("stage") {
@@ -458,6 +473,7 @@ func (h *Handler) renderEditForm(w http.ResponseWriter, r *http.Request, e *ldap
 		TemplateName:  name,
 		TemplateTitle: title,
 		Attributes:    attrs,
+		AddCandidates: h.attributeCandidates(e, fields),
 		Errors:        errs,
 		Crumbs:        tree.Breadcrumbs(e.DN, h.client.BaseDN(), 5),
 	})
@@ -551,6 +567,100 @@ func (h *Handler) schemaControlKind(name string) (ldapx.ControlKind, bool) {
 		return ldapx.ControlKindText, false
 	}
 	return h.client.Schema().ControlKind(name)
+}
+
+// attributeCandidates returns the "Add attribute" picker options: the
+// entry's effective objectClass MUST ∪ MAY (SUP-resolved) minus attributes
+// already active on the form, minus exclusions (userPassword, objectClass,
+// operational, schema-unknown). MUST attributes missing from a broken entry
+// appear here so they can be repaired.
+func (h *Handler) attributeCandidates(e *ldap.Entry, fields []editFieldModel) []tplengine.Value {
+	schema := h.client.Schema()
+	if schema == nil {
+		return nil
+	}
+	active := map[string]bool{}
+	for _, f := range fields {
+		active[strings.ToLower(f.id)] = true
+	}
+	seen := map[string]bool{}
+	var out []tplengine.Value
+	rdn := rdnAttributes(e.DN)
+	add := func(name string) {
+		lower := strings.ToLower(name)
+		if lower == "userpassword" || lower == "objectclass" || rdn[lower] || active[lower] || seen[lower] {
+			return
+		}
+		if h.isOperational(name) {
+			return
+		}
+		at, ok := schema.Attribute(name)
+		if !ok {
+			return
+		}
+		seen[lower] = true
+		out = append(out, tplengine.Value{ID: at.Name, Display: at.Name})
+	}
+	for _, n := range schema.EffectiveMust(e.GetAttributeValues("objectClass")) {
+		add(n)
+	}
+	for _, n := range schema.EffectiveMay(e.GetAttributeValues("objectClass")) {
+		add(n)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// mergeSubmittedFields re-derives fields for attribute names present in the
+// submitted form but absent from the base model (entry/template attributes) —
+// the stateless carry-over of add_attr through review → apply. Control fields
+// (stage, template, add_attr, …) fail the candidate check and are ignored.
+func (h *Handler) mergeSubmittedFields(e *ldap.Entry, fields []editFieldModel, submitted map[string][]string) []editFieldModel {
+	if submitted == nil {
+		return fields
+	}
+	for name := range submitted {
+		if !h.validAddCandidate(e, fields, name) {
+			continue
+		}
+		fields = append(fields, h.addedEditField(e, name, submitted))
+	}
+	return fields
+}
+
+// validAddCandidate reports whether add_attr names a genuine candidate for
+// this entry, so a crafted POST cannot inject arbitrary attributes.
+func (h *Handler) validAddCandidate(e *ldap.Entry, fields []editFieldModel, name string) bool {
+	for _, c := range h.attributeCandidates(e, fields) {
+		if strings.EqualFold(c.ID, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// addedEditField builds the editable field for a just-added attribute (R8):
+// schema-driven control kind, single/multi shape, and empty values so an
+// untouched add stays a no-op.
+func (h *Handler) addedEditField(e *ldap.Entry, name string, submitted map[string][]string) editFieldModel {
+	lower := strings.ToLower(name)
+	f := editFieldModel{
+		id:       name,
+		display:  schemaDisplayName(h.client.Schema(), name),
+		kind:     "text",
+		multi:    h.attrMultiValue(name, nil),
+		required: h.requiredAttrs(e)[lower],
+	}
+	if sk, ok := h.schemaControlKind(name); ok {
+		applySchemaControl(&f, sk, nil)
+	}
+	if !f.readonly {
+		f.values = fieldValues(e, name, submitted)
+	}
+	if len(f.values) == 0 {
+		f.values = []string{""}
+	}
+	return f
 }
 
 // booleanOptions returns the TRUE/FALSE options for a Boolean-syntax field.

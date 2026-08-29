@@ -15,6 +15,18 @@
     <input type="hidden" name="stage" value="review">
     {{if .TemplateName}}<input type="hidden" name="template" value="{{.TemplateName}}">{{end}}
     {{range .Attributes}}{{template "form-field.html" .}}{{end}}
+    {{if .AddCandidates}}
+    <div class="form-field add-attribute">
+      <label for="add-attr">Add attribute</label>
+      <p class="field-help" id="help-add-attr">Attributes the entry's object classes allow but are not present yet.</p>
+      <div class="add-row">
+        <select id="add-attr" name="add_attr" aria-describedby="help-add-attr">
+          {{range .AddCandidates}}<option value="{{.ID}}">{{.Display}}</option>{{end}}
+        </select>
+        <button type="submit" class="secondary" name="add_attr_go" value="1">Add</button>
+      </div>
+    </div>
+    {{end}}
     <div class="form-actions">
       <button type="submit" class="primary">Review changes</button>
       <a class="secondary" href="/api/entry/{{.DN | urlquery}}">Cancel</a>

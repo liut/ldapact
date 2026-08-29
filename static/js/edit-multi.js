@@ -32,6 +32,19 @@
       if (row && row.parentElement.querySelectorAll('.multi-row').length > 1) {
         row.remove();
       }
+      return;
+    }
+    var del = event.target.closest('.delete-attr');
+    if (del) {
+      // Clear every control for this attribute so the submit produces an
+      // empty value set → Delete change (MUST attributes have no such button).
+      var name = del.getAttribute('data-name');
+      document.querySelectorAll('[name="' + name + '"]').forEach(function (el) {
+        el.value = '';
+      });
+      var group = document.getElementById('f-' + name + '-group');
+      if (group) group.innerHTML = '';
+      return;
     }
   });
 })();
