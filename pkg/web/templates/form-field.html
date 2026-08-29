@@ -40,6 +40,7 @@
   <input type="text" id="f-{{.ID}}" name="{{.ID}}" value="{{.Value}}" {{if .Readonly}}readonly{{end}} {{if .Required}}required{{end}} {{if .Error}}aria-invalid="true" aria-describedby="err-{{.ID}}"{{else if .HelpText}}aria-describedby="help-{{.ID}}"{{else if .Hint}}aria-describedby="hint-{{.ID}}"{{end}}>
   {{end}}
   {{if .Hint}}<p class="field-help" id="hint-{{.ID}}">{{.Hint}}</p>{{end}}
+  {{if .BinaryUpload}}<div class="field-upload"><label for="binfile-{{.ID}}">Replace with file</label><input type="file" id="binfile-{{.ID}}" name="binfile_{{.ID}}"></div>{{end}}
   {{if .NoMatches}}<p class="notice">未找到候选</p>{{end}}
   {{if .MaxHit}}<p class="notice" role="alert">{{.Notice}}</p>{{end}}
   {{if .Error}}<p class="field-error" id="err-{{.ID}}" role="alert">{{.Error}}</p>{{end}}

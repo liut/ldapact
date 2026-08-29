@@ -25,6 +25,7 @@
     <input type="hidden" name="stage" value="apply">
     {{if .TemplateName}}<input type="hidden" name="template" value="{{.TemplateName}}">{{end}}
     {{range $hf := .Hidden}}{{range $v := $hf.Values}}<input type="hidden" name="{{$hf.Name}}" value="{{$v}}">{{end}}{{end}}
+    {{range .BinaryTokens}}<input type="hidden" name="bintok_{{.Attr}}" value="{{.Token}}">{{end}}
     <div class="form-actions">
       <button type="submit" class="primary">Apply changes</button>
       <a class="secondary" href="/api/entry/{{.DN | urlquery}}/edit">Back to edit</a>

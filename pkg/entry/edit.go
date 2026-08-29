@@ -1,10 +1,15 @@
 package entry
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -61,6 +66,7 @@ type EditConfirmData struct {
 	TemplateName string
 	Rows         []EditDiffRow
 	Hidden       []EditHiddenField
+	BinaryTokens []BinaryToken
 	Crumbs       []tree.Crumb
 }
 
@@ -79,6 +85,17 @@ type EditHiddenField struct {
 	Values []string
 }
 
+// BinaryToken carries one staged binary upload through the stateless
+// review → apply round trip (R10).
+type BinaryToken struct {
+	Attr  string
+	Token string
+	Size  int64
+}
+
+// maxBinaryUpload caps a single binary attribute upload (R10).
+const maxBinaryUpload = 10 << 20
+
 // editFieldModel is the internal representation of one editable attribute.
 type editFieldModel struct {
 	id       string
@@ -88,6 +105,7 @@ type editFieldModel struct {
 	readonly bool
 	redacted bool
 	required bool
+	binary   bool
 	options  []tplengine.Value
 	values   []string
 	helpText string
@@ -121,6 +139,12 @@ func (h *Handler) EditSubmit(w http.ResponseWriter, r *http.Request) {
 	dn := r.PathValue("dn")
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Bad Request: invalid form", http.StatusBadRequest)
+		return
+	}
+	// Read uploaded files (binary-attribute replacement); non-multipart
+	// requests leave MultipartForm nil and are fine.
+	if err := r.ParseMultipartForm(32 << 20); err != nil && !errors.Is(err, http.ErrNotMultipart) {
+		http.Error(w, "Bad Request: invalid multipart form", http.StatusBadRequest)
 		return
 	}
 	e, err := h.fetchEntry(r, dn)
@@ -176,6 +200,13 @@ func (h *Handler) EditSubmit(w http.ResponseWriter, r *http.Request) {
 	case "review":
 		h.renderEditConfirm(w, r, e, tmpl, fields, changes)
 	case "apply":
+		binChanges, errMsg := h.resolveBinaryTokens(r, fields)
+		if errMsg != "" {
+			h.renderEditForm(w, r, e, fields, tmpl, map[string]string{"_form": errMsg})
+			return
+		}
+		changes = append(changes, binChanges...)
+		defer h.cleanupBinaryTokens(r)
 		if len(changes) == 0 {
 			h.renderPage(w, "No changes — ldapact", "result-page", ResultData{
 				Title:    "No changes",
@@ -514,6 +545,15 @@ func (h *Handler) renderEditConfirm(w http.ResponseWriter, r *http.Request, e *l
 	if tmpl != nil {
 		name = tmpl.Name
 	}
+	tokens, errMsg := h.stashBinaryUploads(r, fields)
+	if errMsg != "" {
+		h.renderEditForm(w, r, e, fields, tmpl, map[string]string{"_form": errMsg})
+		return
+	}
+	uploadByAttr := map[string]BinaryToken{}
+	for _, t := range tokens {
+		uploadByAttr[t.Attr] = t
+	}
 	var rows []EditDiffRow
 	var hidden []EditHiddenField
 	for _, f := range fields {
@@ -530,11 +570,25 @@ func (h *Handler) renderEditConfirm(w http.ResponseWriter, r *http.Request, e *l
 		})
 		hidden = append(hidden, EditHiddenField{Name: f.id, Values: f.values})
 	}
+	for _, f := range fields {
+		if !f.binary || f.redacted || f.id == "userPassword" {
+			continue
+		}
+		if t, ok := uploadByAttr[f.id]; ok {
+			rows = append(rows, EditDiffRow{
+				Name:    f.id,
+				Old:     cleanValues(e.GetAttributeValues(f.id)),
+				New:     []string{fmt.Sprintf("uploaded file (%d bytes)", t.Size)},
+				Changed: true,
+			})
+		}
+	}
 	h.renderPage(w, "Review changes — ldapact", "edit-confirm-content", EditConfirmData{
 		DN:           e.DN,
 		TemplateName: name,
 		Rows:         rows,
 		Hidden:       hidden,
+		BinaryTokens: tokens,
 		Crumbs:       tree.Breadcrumbs(e.DN, h.client.BaseDN(), 5),
 	})
 }
@@ -718,6 +772,7 @@ func applySchemaControl(f *editFieldModel, sk ldapx.ControlKind, current []strin
 		f.kind = "select"
 		f.options = booleanOptions(f.required, current)
 	case ldapx.ControlKindReadonly:
+		f.binary = true
 		if !f.readonly {
 			f.readonly = true
 			f.hint = "Binary value — not editable in this flow"
@@ -946,6 +1001,116 @@ func (h *Handler) validateObjectClassSet(e *ldap.Entry, newSet []string) string 
 	return ""
 }
 
+// stashBinaryUploads stages uploaded files for binary attributes (R10):
+// bytes are written to a per-run temp file keyed by an opaque token so the
+// stateless review → apply round trip can reference them. Returns the staged
+// tokens, or a user-facing error.
+func (h *Handler) stashBinaryUploads(r *http.Request, fields []editFieldModel) ([]BinaryToken, string) {
+	if r.MultipartForm == nil {
+		return nil, ""
+	}
+	binary := map[string]bool{}
+	for _, f := range fields {
+		if f.binary {
+			binary[strings.ToLower(f.id)] = true
+		}
+	}
+	var tokens []BinaryToken
+	for key, fhs := range r.MultipartForm.File {
+		if !strings.HasPrefix(key, "binfile_") {
+			continue
+		}
+		attr := strings.TrimPrefix(key, "binfile_")
+		if !binary[strings.ToLower(attr)] || len(fhs) == 0 {
+			continue
+		}
+		rc, err := fhs[0].Open()
+		if err != nil {
+			return nil, "could not read upload: " + err.Error()
+		}
+		data, err := io.ReadAll(io.LimitReader(rc, maxBinaryUpload+1))
+		rc.Close()
+		if err != nil {
+			return nil, "could not read upload: " + err.Error()
+		}
+		if len(data) > maxBinaryUpload {
+			return nil, fmt.Sprintf("%s upload exceeds the %d byte limit.", attr, maxBinaryUpload)
+		}
+		token := randomToken()
+		path := filepath.Join(os.TempDir(), "ldapact-bin-"+token)
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			return nil, "could not stage upload: " + err.Error()
+		}
+		tokens = append(tokens, BinaryToken{Attr: attr, Token: token, Size: int64(len(data))})
+	}
+	return tokens, ""
+}
+
+// resolveBinaryTokens turns staged bintok_<attr> hidden inputs into Replace
+// changes with the raw uploaded bytes (R10). Only schema-classified binary
+// attributes accept tokens, and tokens must be well-formed temp file names.
+func (h *Handler) resolveBinaryTokens(r *http.Request, fields []editFieldModel) ([]ldap.Change, string) {
+	binary := map[string]bool{}
+	for _, f := range fields {
+		if f.binary {
+			binary[strings.ToLower(f.id)] = true
+		}
+	}
+	var changes []ldap.Change
+	for key, vs := range r.Form {
+		if !strings.HasPrefix(key, "bintok_") || len(vs) == 0 {
+			continue
+		}
+		attr := strings.TrimPrefix(key, "bintok_")
+		if !binary[strings.ToLower(attr)] {
+			continue
+		}
+		token := vs[0]
+		if !validToken(token) {
+			return nil, "Upload token is invalid — please re-select the file."
+		}
+		data, err := os.ReadFile(filepath.Join(os.TempDir(), "ldapact-bin-"+token))
+		if err != nil {
+			return nil, "The uploaded file is no longer available — please re-select it for " + attr + "."
+		}
+		changes = append(changes, ldap.Change{
+			Operation:    ldap.ReplaceAttribute,
+			Modification: ldap.PartialAttribute{Type: attr, Vals: []string{string(data)}},
+		})
+	}
+	return changes, ""
+}
+
+// cleanupBinaryTokens removes staged upload temp files after apply.
+func (h *Handler) cleanupBinaryTokens(r *http.Request) {
+	for key, vs := range r.Form {
+		if strings.HasPrefix(key, "bintok_") && len(vs) > 0 && validToken(vs[0]) {
+			_ = os.Remove(filepath.Join(os.TempDir(), "ldapact-bin-"+vs[0]))
+		}
+	}
+}
+
+// randomToken returns an opaque 32-hex-char upload token.
+func randomToken() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(b)
+}
+
+func validToken(token string) bool {
+	if len(token) != 32 {
+		return false
+	}
+	for _, r := range token {
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 func passwordField() editFieldModel {
 	return editFieldModel{
 		id:       "userPassword",
@@ -968,6 +1133,7 @@ func toFormField(f editFieldModel, dn string) FormField {
 		Values:         f.options,
 		Redacted:       f.redacted,
 		SchemaRequired: f.required,
+		BinaryUpload:   f.binary,
 		HelpText:       f.helpText,
 		Hint:           f.hint,
 		Preview:        f.preview,

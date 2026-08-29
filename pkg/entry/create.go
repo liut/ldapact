@@ -47,6 +47,7 @@ type FormField struct {
 	MultiValues    []string
 	Redacted       bool
 	SchemaRequired bool
+	BinaryUpload   bool
 	PasswordLink   string
 	Hint           string
 	Preview        string

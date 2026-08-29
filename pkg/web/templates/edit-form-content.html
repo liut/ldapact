@@ -11,7 +11,7 @@
   <p class="muted">{{.DN}}</p>
   <p class="field-help">Editing with {{if .TemplateTitle}}template: <strong>{{.TemplateTitle}}</strong>{{else}}the generic editor{{end}}.</p>
   {{if .Errors}}<div class="error-box" role="alert" id="edit-error">{{index .Errors "_form"}}</div>{{end}}
-  <form method="post" action="/api/entry/{{.DN | urlquery}}/edit">
+  <form method="post" action="/api/entry/{{.DN | urlquery}}/edit" enctype="multipart/form-data">
     <input type="hidden" name="stage" value="review">
     {{if .TemplateName}}<input type="hidden" name="template" value="{{.TemplateName}}">{{end}}
     {{if .ObjectClasses.Current}}

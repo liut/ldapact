@@ -7,11 +7,13 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -1552,6 +1554,180 @@ func TestEditObjectClassApplyStructuralRemovalRejected(t *testing.T) {
 	}
 	if modified {
 		t.Error("structural removal must not call Modify")
+	}
+}
+
+func multipartEditForm(t *testing.T, fields url.Values, files map[string][]byte) *http.Request {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	for k, vs := range fields {
+		for _, v := range vs {
+			if err := mw.WriteField(k, v); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for name, data := range files {
+		fw, err := mw.CreateFormFile(name, "upload.bin")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fw.Write(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
+	return req
+}
+
+func TestEditBinaryUploadReview(t *testing.T) {
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		schema: controlSchema(),
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{schemaControlsEntry()}}, nil
+		},
+	}
+	h := testHandler(t, fake)
+	fields := url.Values{
+		"booleanAttr":   {"TRUE"},
+		"dnAttr":        {"cn=manager,ou=People,dc=example,dc=com"},
+		"postalAddress": {"123 Main St\nSpringfield"},
+		"sn":            {"Davis"},
+		"objectClass":   {"top", "person"},
+		"stage":         {"review"},
+	}
+	req := multipartEditForm(t, fields, map[string][]byte{"binfile_certificateAttr": {0x30, 0x82, 0x01}})
+	rr := httptest.NewRecorder()
+	h.EditSubmit(rr, req)
+	body := rr.Body.String()
+	if !strings.Contains(body, "uploaded file (3 bytes)") {
+		t.Errorf("review must name the staged upload: %s", body)
+	}
+	re := regexp.MustCompile(`name="bintok_certificateAttr" value="([0-9a-f]{32})"`)
+	m := re.FindStringSubmatch(body)
+	if m == nil {
+		t.Fatal("review must carry the upload token")
+	}
+	os.Remove(filepath.Join(os.TempDir(), "ldapact-bin-"+m[1]))
+}
+
+func TestEditBinaryUploadApply(t *testing.T) {
+	var got []ldap.Change
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		schema: controlSchema(),
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{schemaControlsEntry()}}, nil
+		},
+		modifyFn: func(ctx context.Context, dn string, changes []ldap.Change) error {
+			got = changes
+			return nil
+		},
+	}
+	h := testHandler(t, fake)
+	token := strings.Repeat("ab", 16)
+	stash := filepath.Join(os.TempDir(), "ldapact-bin-"+token)
+	data := []byte{0x30, 0x82, 0x02, 0x03}
+	if err := os.WriteFile(stash, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	form := url.Values{
+		"booleanAttr":            {"TRUE"},
+		"dnAttr":                 {"cn=manager,ou=People,dc=example,dc=com"},
+		"postalAddress":          {"123 Main St\nSpringfield"},
+		"sn":                     {"Davis"},
+		"objectClass":            {"top", "person"},
+		"bintok_certificateAttr": {token},
+		"stage":                  {"apply"},
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
+	h.EditSubmit(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("code = %d: %s", rr.Code, rr.Body.String())
+	}
+	found := false
+	for _, c := range got {
+		if c.Modification.Type == "certificateAttr" && c.Operation == uint(ldap.ReplaceAttribute) &&
+			len(c.Modification.Vals) == 1 && c.Modification.Vals[0] == string(data) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("binary upload must Replace with the raw bytes, got %+v", got)
+	}
+	if _, err := os.Stat(stash); !os.IsNotExist(err) {
+		t.Error("staged upload must be cleaned up after apply")
+	}
+}
+
+func TestEditBinaryUploadOversize(t *testing.T) {
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		schema: controlSchema(),
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{schemaControlsEntry()}}, nil
+		},
+	}
+	h := testHandler(t, fake)
+	fields := url.Values{
+		"booleanAttr":   {"TRUE"},
+		"dnAttr":        {"cn=manager,ou=People,dc=example,dc=com"},
+		"postalAddress": {"123 Main St\nSpringfield"},
+		"sn":            {"Davis"},
+		"objectClass":   {"top", "person"},
+		"stage":         {"review"},
+	}
+	req := multipartEditForm(t, fields, map[string][]byte{"binfile_certificateAttr": bytes.Repeat([]byte{0x01}, maxBinaryUpload+1)})
+	rr := httptest.NewRecorder()
+	h.EditSubmit(rr, req)
+	if !strings.Contains(rr.Body.String(), "exceeds") {
+		t.Errorf("oversize upload must be rejected: %s", rr.Body.String())
+	}
+}
+
+func TestEditBinaryUploadInvalidToken(t *testing.T) {
+	var modified bool
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		schema: controlSchema(),
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{schemaControlsEntry()}}, nil
+		},
+		modifyFn: func(ctx context.Context, dn string, changes []ldap.Change) error {
+			modified = true
+			return nil
+		},
+	}
+	h := testHandler(t, fake)
+	form := url.Values{
+		"booleanAttr":            {"TRUE"},
+		"dnAttr":                 {"cn=manager,ou=People,dc=example,dc=com"},
+		"postalAddress":          {"123 Main St\nSpringfield"},
+		"sn":                     {"Davis"},
+		"objectClass":            {"top", "person"},
+		"bintok_certificateAttr": {"../../etc/passwd"},
+		"stage":                  {"apply"},
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
+	h.EditSubmit(rr, req)
+	if !strings.Contains(rr.Body.String(), "Upload token is invalid") {
+		t.Errorf("invalid token must be rejected: %s", rr.Body.String())
+	}
+	if modified {
+		t.Error("invalid token must not call Modify")
 	}
 }
 
