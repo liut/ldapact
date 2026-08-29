@@ -14,19 +14,25 @@ static, embeddable binary (R17).
   auto-numbering, `PickList` group selection, client-side `autoFill`, and
   server-side password hashing.
 - **F3 Password** — change passwords with RFC 2307 hashing (SSHA512 default),
-  LDAP ppolicy error surfacing, and bind verification.
+  LDAP ppolicy error surfacing, and bind verification; the change-password
+  affordance is only available on entries that have a `userPassword`
+  attribute.
 - **Edit attributes** — modification-template-driven entry editing with a
   generic editor fallback, review-then-apply, and multi-value support;
   controls render per the LDAP schema definition (attributeType syntax picks
   the control kind — boolean selects, DN fields, read-only binary, textareas —
   single/multi-value shape, schema-MUST markers, and operational-attribute
   exclusion), with template presentation preserved where it does not
-  conflict. `userPassword` stays in the password flow (F3) and RDN changes
-  stay in Rename (F6).
+  conflict. Attributes absent from the entry can be added from the objectClass
+  schema (MUST/MAY), and MAY/schema-unknown attributes can be cleared or
+  deleted (MUST attributes cannot); binary attributes are replaced via file
+  upload through the same review → apply flow. Object classes can be added
+  (AUXILIARY only) and value-less auxiliary classes removed. `userPassword`
+  stays in the password flow (F3) and RDN changes stay in Rename (F6).
 - **F4/F7 LDIF** — streaming import (per-entry continue + downloadable error
   report) and export (subtree streaming, `userPassword` redacted by default).
-- **F5/F6 Delete/Rename** — confirmation flows with typed-DN protection and
-  ceiling-gated recursive subtree delete; rename/move across parents.
+- **F5/F6 Delete/Rename** — leaf-only deletion (entries with children are
+  blocked — delete children first); rename/move across parents.
 - **F8 Search** — scoped (base/one/subtree/global), filtered, sortable,
   paginated search with size/time limits, attribute selection, and inline
   filter errors. Size/time limits apply per LDAP request; when the directory

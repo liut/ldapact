@@ -226,6 +226,19 @@ func TestFlowEditSearch(t *testing.T) {
 		t.Error("template edit form must mark sn required by schema (person MUST)")
 	}
 
+	// Generic editor (ou=People matches no modification template) exposes
+	// the add-attribute picker and the objectClass section.
+	resp = do(t, http.MethodGet, "/api/entry/ou=People,dc=example,dc=com/edit", nil)
+	genericForm := body(t, resp)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(genericForm, "the generic editor") {
+		t.Fatalf("generic edit form = %d: %.300s", resp.StatusCode, genericForm)
+	}
+	for _, want := range []string{`name="add_attr"`, `id="add-oc"`, `name="objectClass"`} {
+		if !strings.Contains(genericForm, want) {
+			t.Errorf("generic edit form missing %q", want)
+		}
+	}
+
 	// Review then apply: change mail, add telephoneNumber.
 	form := url.Values{
 		"givenName":                {"Useru0005"},

@@ -27,6 +27,27 @@ unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
   short-circuit.
 - U4 — Docs: README features/API rows describe schema-driven control
   rendering.
+- U6 — Clear/delete semantics + no-fabrication selects: removing every
+  multi-value row now deletes the attribute (previously a silent no-op);
+  booleans and picklist selects always offer "(not set)" so untouched submits
+  cannot browser-default a value into existence; schema-MUST attributes can
+  never be cleared (server-enforced with an inline error).
+- U5 — Add/delete attributes: the edit form offers an "Add attribute" picker
+  fed by the entry's effective objectClass MUST/MAY set and a per-attribute
+  "Delete attribute" action (MAY/schema-unknown only), both round-tripping
+  through review → apply.
+- U9 — ObjectClass add/remove: edit forms list the entry's object classes;
+  AUXILIARY classes can be added, value-less auxiliary classes can be
+  removed, and STRUCTURAL/ABSTRACT classes are protected; changes apply as a
+  full-set Replace through review → apply.
+- U7 — Binary upload replace: binary-syntax attributes keep their read-only
+  display (photo previews preserved) and gain a file upload that replaces the
+  value set, staged server-side between review and apply (size-capped,
+  token-scoped, cleaned up after apply).
+- U10 — Leaf-only delete: entries with children cannot be deleted (the
+  recursive/typed-DN paths are removed); children must be removed first.
+- U11 — Password gating: the Change password action and `/password` route are
+  only available for entries that have a `userPassword` attribute.
 
 ## Entry edit + search completion (2026-08-26)
 

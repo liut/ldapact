@@ -1,7 +1,7 @@
 ---
 title: Schema-driven edit form controls
 type: feat
-status: active
+status: completed
 date: 2026-08-27
 origin: docs/brainstorms/ldapact-go-reimplementation.md
 ---

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -311,5 +312,123 @@ func TestIntegrationEditEntry(t *testing.T) {
 	h.EditSubmit(rr, bReq)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "No changes") {
 		t.Fatalf("bob unchanged apply = %d: %.400s", rr.Code, rr.Body.String())
+	}
+
+	// Add a MAY attribute (postalCode) via the add-attribute flow: the edit
+	// form's picker submits add_attr, re-renders with the field, then apply
+	// creates it.
+	rr = httptest.NewRecorder()
+	bReq = httptest.NewRequest(http.MethodGet, "/api/entry/"+bobDN+"/edit", nil)
+	bReq.SetPathValue("dn", bobDN)
+	h.EditForm(rr, bReq)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `name="add_attr"`) {
+		t.Fatalf("bob add-attribute picker = %d: %.300s", rr.Code, rr.Body.String())
+	}
+	rr = httptest.NewRecorder()
+	bReq = httptest.NewRequest(http.MethodPost, "/api/entry/"+bobDN+"/edit",
+		strings.NewReader(url.Values{
+			"postalAddress": {"456 Oak Ave\nSpringfield"},
+			"sn":            {"Jones"},
+			"objectClass":   {"top", "person", "organizationalPerson"},
+			"add_attr":      {"postalCode"},
+			"stage":         {"review"},
+		}.Encode()))
+	bReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	bReq.SetPathValue("dn", bobDN)
+	h.EditSubmit(rr, bReq)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `name="postalCode"`) {
+		t.Fatalf("bob add postalCode = %d: %.300s", rr.Code, rr.Body.String())
+	}
+	rr = httptest.NewRecorder()
+	bReq = httptest.NewRequest(http.MethodPost, "/api/entry/"+bobDN+"/edit",
+		strings.NewReader(url.Values{
+			"postalAddress": {"456 Oak Ave\nSpringfield"},
+			"postalCode":    {"12345"},
+			"sn":            {"Jones"},
+			"objectClass":   {"top", "person", "organizationalPerson"},
+			"stage":         {"apply"},
+		}.Encode()))
+	bReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	bReq.SetPathValue("dn", bobDN)
+	h.EditSubmit(rr, bReq)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "Entry updated") {
+		t.Fatalf("bob apply postalCode = %d: %.400s", rr.Code, rr.Body.String())
+	}
+	bRes, err = client.Search(ctx, ldap.NewSearchRequest(bobDN, ldap.ScopeBaseObject,
+		ldap.NeverDerefAliases, 0, 0, false, "(objectClass=*)", []string{"*"}, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := bRes.Entries[0].GetAttributeValue("postalCode"); got != "12345" {
+		t.Errorf("bob postalCode after add = %q", got)
+	}
+
+	// Clear postalAddress (single-value clear → Delete) and verify.
+	rr = httptest.NewRecorder()
+	bReq = httptest.NewRequest(http.MethodPost, "/api/entry/"+bobDN+"/edit",
+		strings.NewReader(url.Values{
+			"postalAddress": {""},
+			"postalCode":    {"12345"},
+			"sn":            {"Jones"},
+			"objectClass":   {"top", "person", "organizationalPerson"},
+			"stage":         {"apply"},
+		}.Encode()))
+	bReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	bReq.SetPathValue("dn", bobDN)
+	h.EditSubmit(rr, bReq)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "Entry updated") {
+		t.Fatalf("bob clear postalAddress = %d: %.400s", rr.Code, rr.Body.String())
+	}
+	bRes, err = client.Search(ctx, ldap.NewSearchRequest(bobDN, ldap.ScopeBaseObject,
+		ldap.NeverDerefAliases, 0, 0, false, "(objectClass=*)", []string{"*"}, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := bRes.Entries[0].GetAttributeValue("postalAddress"); got != "" {
+		t.Errorf("bob postalAddress after clear = %q, want empty", got)
+	}
+
+	// Replace alice's jpegPhoto via a staged multipart upload.
+	newPhoto := []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46}
+	photoToken := strings.Repeat("cd", 16)
+	if err := os.WriteFile(filepath.Join(os.TempDir(), "ldapact-bin-"+photoToken), newPhoto, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	aForm := url.Values{
+		"givenName":                {"Alice"},
+		"sn":                       {"Smith"},
+		"cn":                       {"alice"},
+		"jpegPhoto":                {""},
+		"o":                        {""},
+		"street":                   {""},
+		"l":                        {""},
+		"st":                       {""},
+		"postalCode":               {""},
+		"telephoneNumber":          {"+1 555 0100"},
+		"facsimileTelephoneNumber": {""},
+		"mobile":                   {""},
+		"mail":                     {"alice@new.example.com"},
+		"objectClass":              {"top", "person", "inetOrgPerson"},
+		"bintok_jpegPhoto":         {photoToken},
+		"stage":                    {"apply"},
+	}
+	rr = httptest.NewRecorder()
+	photoReq := httptest.NewRequest(http.MethodPost, "/api/entry/"+dn+"/edit", strings.NewReader(aForm.Encode()))
+	photoReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	photoReq.SetPathValue("dn", dn)
+	h.EditSubmit(rr, photoReq)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "Entry updated") {
+		t.Fatalf("alice photo apply = %d: %.400s", rr.Code, rr.Body.String())
+	}
+	photoRes, err := client.Search(ctx, ldap.NewSearchRequest(dn, ldap.ScopeBaseObject,
+		ldap.NeverDerefAliases, 0, 0, false, "(objectClass=*)", []string{"jpegPhoto"}, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(photoRes.Entries) != 1 {
+		t.Fatal("alice refetch failed")
+	}
+	if got := photoRes.Entries[0].GetAttributeValue("jpegPhoto"); got != string(newPhoto) {
+		t.Errorf("alice jpegPhoto after upload = %q, want %q", got, string(newPhoto))
 	}
 }
