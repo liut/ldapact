@@ -3,6 +3,12 @@
 All notable changes to ldapact v1 are tracked here, one entry per implementation
 unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
 
+## License (2026-08-31)
+
+- Added `LICENSE` (GPL-2.0-or-later), matching phpLDAPadmin whose template
+  artifacts (`template.dtd`, creation templates) this repo builds on; README
+  and AGENTS.md now state the license and the constraint on those artifacts.
+
 ## Docs split: README vs AGENTS.md (2026-08-31)
 
 - README is now user-facing only: intro, features, quick start, configuration,

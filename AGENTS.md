@@ -134,6 +134,13 @@ parse failure at startup — don't weaken that.
 - Paging scale: the AE2 5000-child case is exercised at 1210 children in the
   harness; Docker-gated tests cover the AE3/AE4/partial-AE5 gates.
 
+## License
+
+GPL-2.0-or-later (see `LICENSE`), matching phpLDAPadmin — the repo contains
+verbatim phpLDAPadmin template artifacts (`templates/template.dtd`, creation
+templates). Do not relicense or replace them with non-GPL copies; keep the
+upstream copyright headers intact.
+
 ## Docs
 
 - Product goals and scope: `docs/brainstorms/ldapact-go-reimplementation.md`

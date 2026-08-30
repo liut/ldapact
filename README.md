@@ -178,3 +178,9 @@ endpoints that return data (images, LDIF, report files) or HTMX fragments:
 
 State-changing responses carry `X-Mutated-Subtree: <dn>` so the tree refreshes
 the affected branch.
+
+## License
+
+GPL-2.0-or-later — the same license as phpLDAPadmin, whose template engine and
+template artifacts this project builds on (`templates/` retains the upstream
+copyright headers). See [LICENSE](LICENSE).
