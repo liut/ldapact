@@ -60,7 +60,7 @@ func TestIntegrationCreatePasswordRenameDelete(t *testing.T) {
 		"uidNumber": {"1001"}, "gidNumber": {"100"}, "loginShell": {"/bin/bash"},
 	}
 	rr := httptest.NewRecorder()
-	cReq := httptest.NewRequest(http.MethodPost, "/api/template/posixAccount/create", strings.NewReader(form.Encode()))
+	cReq := httptest.NewRequest(http.MethodPost, "/template/posixAccount/create", strings.NewReader(form.Encode()))
 	cReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	cReq.SetPathValue("name", "posixAccount")
 	h.CreateSubmit(rr, cReq)
@@ -84,7 +84,7 @@ func TestIntegrationCreatePasswordRenameDelete(t *testing.T) {
 	// F3: change the password through the handler.
 	pwForm := url.Values{"new_password": {"Changed#2026"}, "confirm_password": {"Changed#2026"}}
 	rr = httptest.NewRecorder()
-	pReq := httptest.NewRequest(http.MethodPost, "/api/entry/cn=alice,ou=People,dc=example,dc=com/password", strings.NewReader(pwForm.Encode()))
+	pReq := httptest.NewRequest(http.MethodPost, "/entry/cn=alice,ou=People,dc=example,dc=com/password", strings.NewReader(pwForm.Encode()))
 	pReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	pReq.SetPathValue("dn", "cn=alice,ou=People,dc=example,dc=com")
 	h.PasswordChange(rr, pReq)
@@ -103,7 +103,7 @@ func TestIntegrationCreatePasswordRenameDelete(t *testing.T) {
 	// F6: rename the entry.
 	rForm := url.Values{"new_rdn": {"cn=alice2"}, "delete_old_rdn": {"1"}}
 	rr = httptest.NewRecorder()
-	rReq := httptest.NewRequest(http.MethodPost, "/api/entry/cn=alice,ou=People,dc=example,dc=com/rename", strings.NewReader(rForm.Encode()))
+	rReq := httptest.NewRequest(http.MethodPost, "/entry/cn=alice,ou=People,dc=example,dc=com/rename", strings.NewReader(rForm.Encode()))
 	rReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rReq.SetPathValue("dn", "cn=alice,ou=People,dc=example,dc=com")
 	h.RenameSubmit(rr, rReq)
@@ -114,7 +114,7 @@ func TestIntegrationCreatePasswordRenameDelete(t *testing.T) {
 	// F5: delete the (leaf) entry.
 	dForm := url.Values{"confirm_dn": {"cn=alice2,ou=People,dc=example,dc=com"}}
 	rr = httptest.NewRecorder()
-	dReq := httptest.NewRequest(http.MethodPost, "/api/entry/cn=alice2,ou=People,dc=example,dc=com/delete", strings.NewReader(dForm.Encode()))
+	dReq := httptest.NewRequest(http.MethodPost, "/entry/cn=alice2,ou=People,dc=example,dc=com/delete", strings.NewReader(dForm.Encode()))
 	dReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	dReq.SetPathValue("dn", "cn=alice2,ou=People,dc=example,dc=com")
 	h.DeleteSubmit(rr, dReq)
@@ -176,7 +176,7 @@ func TestIntegrationEditEntry(t *testing.T) {
 
 	// Detail page renders the photo attribute as an embedded image.
 	rr := httptest.NewRecorder()
-	dReq := httptest.NewRequest(http.MethodGet, "/api/entry/"+dn, nil)
+	dReq := httptest.NewRequest(http.MethodGet, "/entry/"+dn, nil)
 	dReq.SetPathValue("dn", dn)
 	h.Detail(rr, dReq)
 	if !strings.Contains(rr.Body.String(), `/photo?idx=0"`) {
@@ -192,7 +192,7 @@ func TestIntegrationEditEntry(t *testing.T) {
 
 	// The modification template matches and prefills current values.
 	rr = httptest.NewRecorder()
-	gReq := httptest.NewRequest(http.MethodGet, "/api/entry/"+dn+"/edit", nil)
+	gReq := httptest.NewRequest(http.MethodGet, "/entry/"+dn+"/edit", nil)
 	gReq.SetPathValue("dn", dn)
 	h.EditForm(rr, gReq)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "Generic: Address Book Entry") {
@@ -216,7 +216,7 @@ func TestIntegrationEditEntry(t *testing.T) {
 		"stage":                    {"review"},
 	}
 	rr = httptest.NewRecorder()
-	rReq := httptest.NewRequest(http.MethodPost, "/api/entry/"+dn+"/edit", strings.NewReader(form.Encode()))
+	rReq := httptest.NewRequest(http.MethodPost, "/entry/"+dn+"/edit", strings.NewReader(form.Encode()))
 	rReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rReq.SetPathValue("dn", dn)
 	h.EditSubmit(rr, rReq)
@@ -226,7 +226,7 @@ func TestIntegrationEditEntry(t *testing.T) {
 
 	form.Set("stage", "apply")
 	rr = httptest.NewRecorder()
-	aReq := httptest.NewRequest(http.MethodPost, "/api/entry/"+dn+"/edit", strings.NewReader(form.Encode()))
+	aReq := httptest.NewRequest(http.MethodPost, "/entry/"+dn+"/edit", strings.NewReader(form.Encode()))
 	aReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	aReq.SetPathValue("dn", dn)
 	h.EditSubmit(rr, aReq)
@@ -252,7 +252,7 @@ func TestIntegrationEditEntry(t *testing.T) {
 	// Generic editor: postalAddress renders as a textarea prefilled, sn
 	// carries the schema-MUST marker, and no operational attrs leak in.
 	rr = httptest.NewRecorder()
-	bReq := httptest.NewRequest(http.MethodGet, "/api/entry/"+bobDN+"/edit", nil)
+	bReq := httptest.NewRequest(http.MethodGet, "/entry/"+bobDN+"/edit", nil)
 	bReq.SetPathValue("dn", bobDN)
 	h.EditForm(rr, bReq)
 	bobForm := rr.Body.String()
@@ -278,7 +278,7 @@ func TestIntegrationEditEntry(t *testing.T) {
 		"stage":         {"review"},
 	}
 	rr = httptest.NewRecorder()
-	bReq = httptest.NewRequest(http.MethodPost, "/api/entry/"+bobDN+"/edit", strings.NewReader(bobValues.Encode()))
+	bReq = httptest.NewRequest(http.MethodPost, "/entry/"+bobDN+"/edit", strings.NewReader(bobValues.Encode()))
 	bReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	bReq.SetPathValue("dn", bobDN)
 	h.EditSubmit(rr, bReq)
@@ -287,7 +287,7 @@ func TestIntegrationEditEntry(t *testing.T) {
 	}
 	bobValues.Set("stage", "apply")
 	rr = httptest.NewRecorder()
-	bReq = httptest.NewRequest(http.MethodPost, "/api/entry/"+bobDN+"/edit", strings.NewReader(bobValues.Encode()))
+	bReq = httptest.NewRequest(http.MethodPost, "/entry/"+bobDN+"/edit", strings.NewReader(bobValues.Encode()))
 	bReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	bReq.SetPathValue("dn", bobDN)
 	h.EditSubmit(rr, bReq)
@@ -306,7 +306,7 @@ func TestIntegrationEditEntry(t *testing.T) {
 
 	// Unchanged submit short-circuits to "No changes" (no Modify).
 	rr = httptest.NewRecorder()
-	bReq = httptest.NewRequest(http.MethodPost, "/api/entry/"+bobDN+"/edit", strings.NewReader(bobValues.Encode()))
+	bReq = httptest.NewRequest(http.MethodPost, "/entry/"+bobDN+"/edit", strings.NewReader(bobValues.Encode()))
 	bReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	bReq.SetPathValue("dn", bobDN)
 	h.EditSubmit(rr, bReq)
@@ -318,14 +318,14 @@ func TestIntegrationEditEntry(t *testing.T) {
 	// form's picker submits add_attr, re-renders with the field, then apply
 	// creates it.
 	rr = httptest.NewRecorder()
-	bReq = httptest.NewRequest(http.MethodGet, "/api/entry/"+bobDN+"/edit", nil)
+	bReq = httptest.NewRequest(http.MethodGet, "/entry/"+bobDN+"/edit", nil)
 	bReq.SetPathValue("dn", bobDN)
 	h.EditForm(rr, bReq)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `name="add_attr"`) {
 		t.Fatalf("bob add-attribute picker = %d: %.300s", rr.Code, rr.Body.String())
 	}
 	rr = httptest.NewRecorder()
-	bReq = httptest.NewRequest(http.MethodPost, "/api/entry/"+bobDN+"/edit",
+	bReq = httptest.NewRequest(http.MethodPost, "/entry/"+bobDN+"/edit",
 		strings.NewReader(url.Values{
 			"postalAddress": {"456 Oak Ave\nSpringfield"},
 			"sn":            {"Jones"},
@@ -341,7 +341,7 @@ func TestIntegrationEditEntry(t *testing.T) {
 		t.Fatalf("bob add postalCode = %d: %.300s", rr.Code, rr.Body.String())
 	}
 	rr = httptest.NewRecorder()
-	bReq = httptest.NewRequest(http.MethodPost, "/api/entry/"+bobDN+"/edit",
+	bReq = httptest.NewRequest(http.MethodPost, "/entry/"+bobDN+"/edit",
 		strings.NewReader(url.Values{
 			"postalAddress": {"456 Oak Ave\nSpringfield"},
 			"postalCode":    {"12345"},
@@ -366,7 +366,7 @@ func TestIntegrationEditEntry(t *testing.T) {
 
 	// Clear postalAddress (single-value clear → Delete) and verify.
 	rr = httptest.NewRecorder()
-	bReq = httptest.NewRequest(http.MethodPost, "/api/entry/"+bobDN+"/edit",
+	bReq = httptest.NewRequest(http.MethodPost, "/entry/"+bobDN+"/edit",
 		strings.NewReader(url.Values{
 			"postalAddress": {""},
 			"postalCode":    {"12345"},
@@ -414,7 +414,7 @@ func TestIntegrationEditEntry(t *testing.T) {
 		"stage":                    {"apply"},
 	}
 	rr = httptest.NewRecorder()
-	photoReq := httptest.NewRequest(http.MethodPost, "/api/entry/"+dn+"/edit", strings.NewReader(aForm.Encode()))
+	photoReq := httptest.NewRequest(http.MethodPost, "/entry/"+dn+"/edit", strings.NewReader(aForm.Encode()))
 	photoReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	photoReq.SetPathValue("dn", dn)
 	h.EditSubmit(rr, photoReq)

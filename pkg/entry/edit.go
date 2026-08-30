@@ -113,7 +113,7 @@ type editFieldModel struct {
 	preview  string
 }
 
-// EditForm handles GET /api/entry/{dn...}/edit (R1).
+// EditForm handles GET /entry/{dn...}/edit (R1).
 func (h *Handler) EditForm(w http.ResponseWriter, r *http.Request) {
 	dn := r.PathValue("dn")
 	e, err := h.fetchEntry(r, dn)
@@ -133,7 +133,7 @@ func (h *Handler) EditForm(w http.ResponseWriter, r *http.Request) {
 	h.renderEditForm(w, r, e, fields, tmpl, nil)
 }
 
-// EditSubmit handles POST /api/entry/{dn...}/edit (R1/R3/R4):
+// EditSubmit handles POST /entry/{dn...}/edit (R1/R3/R4):
 // stage=review renders the old→new page; stage=apply executes the modify.
 func (h *Handler) EditSubmit(w http.ResponseWriter, r *http.Request) {
 	dn := r.PathValue("dn")
@@ -215,7 +215,7 @@ func (h *Handler) EditSubmit(w http.ResponseWriter, r *http.Request) {
 			h.renderPage(w, "No changes — ldapact", "result-page", ResultData{
 				Title:    "No changes",
 				Message:  "No attributes were changed.",
-				Link:     "/api/entry/" + url.PathEscape(dn),
+				Link:     "/entry/" + url.PathEscape(dn),
 				LinkText: "Back to entry",
 			})
 			return
@@ -237,7 +237,7 @@ func (h *Handler) EditSubmit(w http.ResponseWriter, r *http.Request) {
 		h.renderPage(w, "Entry updated — ldapact", "result-page", ResultData{
 			Title:    "Entry updated",
 			Message:  fmt.Sprintf("Updated %s", dn),
-			Link:     "/api/entry/" + url.PathEscape(dn),
+			Link:     "/entry/" + url.PathEscape(dn),
 			LinkText: "View entry",
 		})
 	default:
@@ -1171,7 +1171,7 @@ func toFormField(f editFieldModel, dn string) FormField {
 		Preview:        f.preview,
 	}
 	if f.redacted {
-		ff.PasswordLink = "/api/entry/" + url.PathEscape(dn) + "/password"
+		ff.PasswordLink = "/entry/" + url.PathEscape(dn) + "/password"
 	}
 	if !f.multi && !f.redacted && len(f.values) > 0 {
 		ff.Value = f.values[0]

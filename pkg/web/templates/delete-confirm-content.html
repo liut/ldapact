@@ -7,15 +7,15 @@
   {{if .Blocked}}
   <div class="warning-box" role="alert">This entry has {{.ChildCount}} direct children — delete them first. Entries with children cannot be deleted.</div>
   <div class="form-actions">
-    <a class="secondary" href="/api/entry/{{.DN | urlquery}}">Back to entry</a>
+    <a class="secondary" href="/entry/{{.DN | urlquery}}">Back to entry</a>
   </div>
   {{else}}
   <div class="warning-box" role="alert">Deleting an entry is irreversible (OpenLDAP has no recycle bin by default).</div>
-  <form method="post" action="/api/entry/{{.DN | urlquery}}/delete">
+  <form method="post" action="/entry/{{.DN | urlquery}}/delete">
     <input type="hidden" name="confirm_dn" value="{{.DN}}">
     <div class="form-actions">
       <button type="submit" class="danger">Delete entry</button>
-      <a class="secondary" href="/api/entry/{{.DN | urlquery}}">Cancel</a>
+      <a class="secondary" href="/entry/{{.DN | urlquery}}">Cancel</a>
     </div>
   </form>
   {{end}}

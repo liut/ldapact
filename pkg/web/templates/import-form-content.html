@@ -1,7 +1,7 @@
 {{define "import-form-content"}}
 <section aria-labelledby="import-title">
   <h1 id="import-title">Import LDIF</h1>
-  <form method="post" action="/api/import" enctype="multipart/form-data">
+  <form method="post" action="/import" enctype="multipart/form-data">
     <div class="form-field">
       <label><input type="checkbox" name="dry_run" value="1"> Dry run (validate only, no LDAP writes)</label>
     </div>

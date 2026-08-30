@@ -3,6 +3,15 @@
 All notable changes to ldapact v1 are tracked here, one entry per implementation
 unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
 
+## Route prefix cleanup (2026-08-31)
+
+- `/api` is now reserved for endpoints that return data or HTMX fragments:
+  `/api/tree/{dn...}` (tree children fragment), `/api/entry/{dn...}/photo`
+  (image data), `/api/export` (LDIF data), `/api/import/report/{id}` (plain
+  text report). Page routes lost the prefix and live under plain paths:
+  `/entry/...` (detail, edit, password, delete, rename), `/template/...`
+  (create), `/schema/...`, `/search`, and `/import`.
+
 ## Schema browser detail pages (2026-08-30)
 
 - R5.x — schema detail pages now match the phpLDAPadmin layout.

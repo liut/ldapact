@@ -1,7 +1,7 @@
 {{define "search-content"}}
 <section aria-labelledby="search-title">
   <h1 id="search-title">Search</h1>
-  <form method="get" action="/api/search" class="search-form">
+  <form method="get" action="/search" class="search-form">
     <div class="form-field">
       <label for="q">Filter</label>
       <input type="text" id="q" name="q" value="{{.Query}}" placeholder="uid=alice or (uid=alice)" required
@@ -37,7 +37,7 @@
     <tbody>
       {{range .Rows}}
       <tr>
-        <td><a href="/api/entry/{{.DN | urlquery}}">{{.DN}}</a></td>
+        <td><a href="/entry/{{.DN | urlquery}}">{{.DN}}</a></td>
         {{if $.AttrColumns}}{{range .AttrValues}}<td>{{.}}</td>{{end}}{{else}}
         <td>{{.ObjectClasses}}</td>
         <td>{{.Modified}}</td>{{end}}

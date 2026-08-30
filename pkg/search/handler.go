@@ -58,7 +58,7 @@ type Column struct {
 	Dir    string
 }
 
-// Handler serves GET /api/search.
+// Handler serves GET /search.
 type Handler struct {
 	client   Searcher
 	renderer *web.Renderer
@@ -78,7 +78,7 @@ var sortAttrs = map[string]string{
 	"modified":    "modifyTimestamp",
 }
 
-// Search handles GET /api/search with scope=base|one|subtree|global,
+// Search handles GET /search with scope=base|one|subtree|global,
 // sort=dn|objectclass|modified, dir=asc|desc, size_limit, time_limit, and
 // attrs (R4 completion).
 func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
@@ -271,7 +271,7 @@ func (p searchParams) href(page int, sortKey, dir string) string {
 	if p.attrs != "" {
 		v.Set("attrs", p.attrs)
 	}
-	return "/api/search?" + v.Encode()
+	return "/search?" + v.Encode()
 }
 
 // sortPage orders one result page by the requested key/direction. It is

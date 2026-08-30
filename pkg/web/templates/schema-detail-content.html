@@ -1,8 +1,8 @@
 {{define "schema-detail-content"}}
 <nav class="toolbar" aria-label="Tools">
   <a class="secondary" href="/">Directory</a>
-  <a class="secondary" href="/api/schema/objectclass">Object classes</a>
-  <a class="secondary" href="/api/schema/attribute">Attribute types</a>
+  <a class="secondary" href="/schema/objectclass">Object classes</a>
+  <a class="secondary" href="/schema/attribute">Attribute types</a>
 </nav>
 <section aria-labelledby="schema-detail-title">
   {{if .IsObjectClass}}
@@ -68,6 +68,6 @@
     </tbody>
   </table>
   {{end}}
-  <p><a href="/api/schema/{{.BackList}}">Back to {{if eq .BackList "objectclass"}}Object Classes{{else}}Attribute Types{{end}} list</a></p>
+  <p><a href="/schema/{{.BackList}}">Back to {{if eq .BackList "objectclass"}}Object Classes{{else}}Attribute Types{{end}} list</a></p>
 </section>
 {{end}}

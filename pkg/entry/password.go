@@ -22,7 +22,7 @@ type PasswordFormData struct {
 	Success       string
 }
 
-// PasswordForm handles GET /api/entry/{dn...}/password.
+// PasswordForm handles GET /entry/{dn...}/password.
 func (h *Handler) PasswordForm(w http.ResponseWriter, r *http.Request) {
 	dn := r.PathValue("dn")
 	has, err := h.passwordAvailable(r, dn)
@@ -44,7 +44,7 @@ func (h *Handler) PasswordForm(w http.ResponseWriter, r *http.Request) {
 	h.renderPage(w, "Change password — ldapact", "password-form-content", PasswordFormData{DN: dn, CurrentScheme: scheme})
 }
 
-// PasswordChange handles POST /api/entry/{dn...}/password (F3).
+// PasswordChange handles POST /entry/{dn...}/password (F3).
 func (h *Handler) PasswordChange(w http.ResponseWriter, r *http.Request) {
 	dn := r.PathValue("dn")
 	if err := r.ParseForm(); err != nil {

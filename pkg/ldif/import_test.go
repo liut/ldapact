@@ -53,7 +53,7 @@ func multipartBody(t *testing.T, ldifContent string, dryRun bool) (*bytes.Buffer
 func postImport(t *testing.T, h *ImportHandler, body *bytes.Buffer, contentType string) *httptest.ResponseRecorder {
 	t.Helper()
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/import", body)
+	req := httptest.NewRequest(http.MethodPost, "/import", body)
 	req.Header.Set("Content-Type", contentType)
 	h.Submit(rr, req)
 	return rr

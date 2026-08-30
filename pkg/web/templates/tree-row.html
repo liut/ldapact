@@ -5,7 +5,7 @@
     aria-posinset="{{.PosInSet}}"
     {{if .HasChildren}}aria-expanded="false"{{end}}
     data-dn="{{.DN}}">
-  <a class="tree-label" href="/api/entry/{{.DN | urlquery}}">{{.Label}}</a>
+  <a class="tree-label" href="/entry/{{.DN | urlquery}}">{{.Label}}</a>
   {{if .HasChildren}}
   <button type="button" class="tree-toggle" aria-label="Toggle children of {{.Label}}">▸</button>
   {{end}}

@@ -3,7 +3,7 @@
   <h1 id="rename-title">Rename / move entry</h1>
   <p class="muted">{{.DN}}</p>
   {{if .Error}}<div class="error-box" role="alert">{{.Error}}</div>{{end}}
-  <form method="post" action="/api/entry/{{.DN | urlquery}}/rename">
+  <form method="post" action="/entry/{{.DN | urlquery}}/rename">
     <div class="form-field">
       <label for="new-rdn">New RDN</label>
       <input type="text" id="new-rdn" name="new_rdn" value="{{.NewRDN}}" placeholder="cn=newvalue" required>
@@ -17,7 +17,7 @@
     </div>
     <div class="form-actions">
       <button type="submit" class="primary">Rename</button>
-      <a class="secondary" href="/api/entry/{{.DN | urlquery}}">Cancel</a>
+      <a class="secondary" href="/entry/{{.DN | urlquery}}">Cancel</a>
     </div>
   </form>
 </section>

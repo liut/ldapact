@@ -45,7 +45,7 @@ func TestSearchResults(t *testing.T) {
 		HasMore: false, Page: 1,
 	}})
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/search?q=(uid=alice)&scope=subtree", nil)
+	req := httptest.NewRequest(http.MethodGet, "/search?q=(uid=alice)&scope=subtree", nil)
 	h.Search(rr, req)
 	body := rr.Body.String()
 	if rr.Code != http.StatusOK {
@@ -65,7 +65,7 @@ func TestSearchResults(t *testing.T) {
 func TestSearchInvalidFilter(t *testing.T) {
 	h := searchHandler(t, &fakeSearcher{})
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/search?q=(uid=alice", nil)
+	req := httptest.NewRequest(http.MethodGet, "/search?q=(uid=alice", nil)
 	h.Search(rr, req)
 	body := rr.Body.String()
 	if !strings.Contains(body, "filter syntax error at position") || !strings.Contains(body, `aria-invalid="true"`) {
@@ -88,7 +88,7 @@ func TestSearchWrapsBareFilter(t *testing.T) {
 		fake := &fakeSearcher{res: &ldapx.PageResult{}}
 		h := searchHandler(t, fake)
 		rr := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/api/search?q="+url.QueryEscape(tc.query)+"&scope=subtree", nil)
+		req := httptest.NewRequest(http.MethodGet, "/search?q="+url.QueryEscape(tc.query)+"&scope=subtree", nil)
 		h.Search(rr, req)
 		if fake.gotOpts.Filter != tc.want {
 			t.Errorf("query %q: filter sent = %q, want %q", tc.query, fake.gotOpts.Filter, tc.want)
@@ -102,7 +102,7 @@ func TestSearchWrapsBareFilter(t *testing.T) {
 func TestSearchEmptyQuery(t *testing.T) {
 	h := searchHandler(t, &fakeSearcher{})
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/search", nil)
+	req := httptest.NewRequest(http.MethodGet, "/search", nil)
 	h.Search(rr, req)
 	if !strings.Contains(rr.Body.String(), "Enter a search filter") {
 		t.Errorf("empty query feedback: %s", rr.Body.String())
@@ -112,7 +112,7 @@ func TestSearchEmptyQuery(t *testing.T) {
 func TestSearchNoResults(t *testing.T) {
 	h := searchHandler(t, &fakeSearcher{res: &ldapx.PageResult{Entries: []*ldap.Entry{}, HasMore: false, Page: 1}})
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/search?q=(uid=nobody)", nil)
+	req := httptest.NewRequest(http.MethodGet, "/search?q=(uid=nobody)", nil)
 	h.Search(rr, req)
 	if !strings.Contains(rr.Body.String(), "0 results") {
 		t.Errorf("zero results message: %s", rr.Body.String())
@@ -125,7 +125,7 @@ func TestSearchPagination(t *testing.T) {
 		HasMore: true, Page: 1,
 	}})
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/search?q=(objectClass=*)&page=1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/search?q=(objectClass=*)&page=1", nil)
 	h.Search(rr, req)
 	if !strings.Contains(rr.Body.String(), "Next page") {
 		t.Errorf("pagination missing: %s", rr.Body.String())
@@ -145,7 +145,7 @@ func TestSearchGlobalUsesRootBase(t *testing.T) {
 	fake := &fakeSearcher{res: &ldapx.PageResult{Entries: []*ldap.Entry{}, HasMore: false, Page: 1}}
 	h := searchHandler(t, fake)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/search?q=(uid=alice)&scope=global", nil)
+	req := httptest.NewRequest(http.MethodGet, "/search?q=(uid=alice)&scope=global", nil)
 	h.Search(rr, req)
 	if fake.gotOpts.BaseDN != "" || !fake.gotOpts.AllowEmptyBase {
 		t.Errorf("global scope opts = %+v", fake.gotOpts)
@@ -156,7 +156,7 @@ func TestSearchPageSize(t *testing.T) {
 	fake := &fakeSearcher{res: &ldapx.PageResult{Entries: []*ldap.Entry{}, HasMore: false, Page: 1}}
 	h := searchHandler(t, fake)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/search?q=(uid=x)&page_size=25", nil)
+	req := httptest.NewRequest(http.MethodGet, "/search?q=(uid=x)&page_size=25", nil)
 	h.Search(rr, req)
 	if fake.gotOpts.PageSize != 25 {
 		t.Errorf("page_size = %d", fake.gotOpts.PageSize)
@@ -176,7 +176,7 @@ func TestSearchScopes(t *testing.T) {
 		fake := &fakeSearcher{res: &ldapx.PageResult{Entries: []*ldap.Entry{}, HasMore: false, Page: 1}}
 		h := searchHandler(t, fake)
 		rr := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/api/search?q=(objectClass=*)&scope="+tc.scope, nil)
+		req := httptest.NewRequest(http.MethodGet, "/search?q=(objectClass=*)&scope="+tc.scope, nil)
 		h.Search(rr, req)
 		if rr.Code != http.StatusOK {
 			t.Fatalf("%s: code = %d", tc.scope, rr.Code)
@@ -193,7 +193,7 @@ func TestSearchScopes(t *testing.T) {
 func TestSearchUnknownScope(t *testing.T) {
 	h := searchHandler(t, &fakeSearcher{})
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/search?q=(uid=x)&scope=two", nil)
+	req := httptest.NewRequest(http.MethodGet, "/search?q=(uid=x)&scope=two", nil)
 	h.Search(rr, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("code = %d, want 400", rr.Code)
@@ -204,7 +204,7 @@ func TestSearchSortParams(t *testing.T) {
 	fake := &fakeSearcher{res: &ldapx.PageResult{Entries: []*ldap.Entry{}, HasMore: false, Page: 1}}
 	h := searchHandler(t, fake)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/search?q=(uid=x)&sort=modified&dir=desc", nil)
+	req := httptest.NewRequest(http.MethodGet, "/search?q=(uid=x)&sort=modified&dir=desc", nil)
 	h.Search(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("code = %d", rr.Code)
@@ -218,7 +218,7 @@ func TestSearchSortDefaults(t *testing.T) {
 	fake := &fakeSearcher{res: &ldapx.PageResult{Entries: []*ldap.Entry{}, HasMore: false, Page: 1}}
 	h := searchHandler(t, fake)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/search?q=(uid=x)", nil)
+	req := httptest.NewRequest(http.MethodGet, "/search?q=(uid=x)", nil)
 	h.Search(rr, req)
 	if fake.gotOpts.Sort != nil {
 		t.Errorf("default dn sort must not attach a server control: %+v", fake.gotOpts.Sort)
@@ -227,7 +227,7 @@ func TestSearchSortDefaults(t *testing.T) {
 	fake2 := &fakeSearcher{res: &ldapx.PageResult{Entries: []*ldap.Entry{}, HasMore: false, Page: 1}}
 	h2 := searchHandler(t, fake2)
 	rr2 := httptest.NewRecorder()
-	req2 := httptest.NewRequest(http.MethodGet, "/api/search?q=(uid=x)&sort=objectclass", nil)
+	req2 := httptest.NewRequest(http.MethodGet, "/search?q=(uid=x)&sort=objectclass", nil)
 	h2.Search(rr2, req2)
 	if fake2.gotOpts.Sort == nil || fake2.gotOpts.Sort.Reverse {
 		t.Errorf("objectclass default dir = %+v", fake2.gotOpts.Sort)
@@ -237,7 +237,7 @@ func TestSearchSortDefaults(t *testing.T) {
 func TestSearchUnknownSort(t *testing.T) {
 	h := searchHandler(t, &fakeSearcher{})
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/search?q=(uid=x)&sort=telephone", nil)
+	req := httptest.NewRequest(http.MethodGet, "/search?q=(uid=x)&sort=telephone", nil)
 	h.Search(rr, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("code = %d, want 400", rr.Code)
@@ -248,7 +248,7 @@ func TestSearchLimitsAndAttrs(t *testing.T) {
 	fake := &fakeSearcher{res: &ldapx.PageResult{Entries: []*ldap.Entry{}, HasMore: false, Page: 1}}
 	h := searchHandler(t, fake)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/search?q=(uid=x)&size_limit=20&time_limit=5&attrs=cn,mail", nil)
+	req := httptest.NewRequest(http.MethodGet, "/search?q=(uid=x)&size_limit=20&time_limit=5&attrs=cn,mail", nil)
 	h.Search(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("code = %d: %s", rr.Code, rr.Body.String())
@@ -267,7 +267,7 @@ func TestSearchLimitsAndAttrs(t *testing.T) {
 func TestSearchInvalidLimit(t *testing.T) {
 	h := searchHandler(t, &fakeSearcher{})
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/search?q=(uid=x)&size_limit=-1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/search?q=(uid=x)&size_limit=-1", nil)
 	h.Search(rr, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("code = %d, want 400", rr.Code)
@@ -278,7 +278,7 @@ func TestSearchPageSizeCap(t *testing.T) {
 	fake := &fakeSearcher{res: &ldapx.PageResult{Entries: []*ldap.Entry{}, HasMore: false, Page: 1}}
 	h := searchHandler(t, fake)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/search?q=(uid=x)&page_size=501", nil)
+	req := httptest.NewRequest(http.MethodGet, "/search?q=(uid=x)&page_size=501", nil)
 	h.Search(rr, req)
 	if fake.gotOpts.PageSize != DefaultPageSize {
 		t.Errorf("page_size = %d, want cap at %d", fake.gotOpts.PageSize, DefaultPageSize)
@@ -301,7 +301,7 @@ func TestSearchClientSortFallback(t *testing.T) {
 	}}
 	h := searchHandler(t, fake)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/search?q=(uid=*)&sort=modified&dir=desc", nil)
+	req := httptest.NewRequest(http.MethodGet, "/search?q=(uid=*)&sort=modified&dir=desc", nil)
 	h.Search(rr, req)
 	body := rr.Body.String()
 	if rr.Code != http.StatusOK {
@@ -328,7 +328,7 @@ func TestSearchCustomAttrsColumns(t *testing.T) {
 	}}
 	h := searchHandler(t, fake)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/search?q=(uid=alice)&attrs=cn,mail", nil)
+	req := httptest.NewRequest(http.MethodGet, "/search?q=(uid=alice)&attrs=cn,mail", nil)
 	h.Search(rr, req)
 	body := rr.Body.String()
 	for _, want := range []string{"alice@example.com", ">cn<", ">mail<"} {

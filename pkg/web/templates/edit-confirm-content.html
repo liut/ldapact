@@ -2,7 +2,7 @@
 <nav aria-label="Breadcrumb">
   <ol class="breadcrumbs">
     {{range .Crumbs}}
-    <li>{{if .DN}}<a href="/api/entry/{{.DN | urlquery}}">{{.Label}}</a>{{else}}<span aria-hidden="true">{{.Label}}</span>{{end}}</li>
+    <li>{{if .DN}}<a href="/entry/{{.DN | urlquery}}">{{.Label}}</a>{{else}}<span aria-hidden="true">{{.Label}}</span>{{end}}</li>
     {{end}}
   </ol>
 </nav>
@@ -21,15 +21,15 @@
       {{end}}
     </tbody>
   </table>
-  <form method="post" action="/api/entry/{{.DN | urlquery}}/edit">
+  <form method="post" action="/entry/{{.DN | urlquery}}/edit">
     <input type="hidden" name="stage" value="apply">
     {{if .TemplateName}}<input type="hidden" name="template" value="{{.TemplateName}}">{{end}}
     {{range $hf := .Hidden}}{{range $v := $hf.Values}}<input type="hidden" name="{{$hf.Name}}" value="{{$v}}">{{end}}{{end}}
     {{range .BinaryTokens}}<input type="hidden" name="bintok_{{.Attr}}" value="{{.Token}}">{{end}}
     <div class="form-actions">
       <button type="submit" class="primary">Apply changes</button>
-      <a class="secondary" href="/api/entry/{{.DN | urlquery}}/edit">Back to edit</a>
-      <a class="secondary" href="/api/entry/{{.DN | urlquery}}">Cancel</a>
+      <a class="secondary" href="/entry/{{.DN | urlquery}}/edit">Back to edit</a>
+      <a class="secondary" href="/entry/{{.DN | urlquery}}">Cancel</a>
     </div>
   </form>
 </section>

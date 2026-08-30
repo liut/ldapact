@@ -85,27 +85,34 @@ func NewHandler(d Deps) http.Handler {
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(ldapact.Assets())))
 	if treeBrowser != nil {
 		// Go's ServeMux only allows multi-segment wildcards ({dn...}) as the
-		// final segment, so suffix actions are dispatched manually.
+		// final segment, so suffix actions are dispatched manually. /api/ is
+		// reserved for endpoints that return data or HTMX fragments; full
+		// pages live under their plain route.
 		mux.HandleFunc("GET /api/tree/{dn...}", func(w http.ResponseWriter, r *http.Request) {
 			treeDispatch(treeBrowser, w, r)
 		})
-		mux.HandleFunc("GET /api/schema/objectclass", schemaBrowser.ObjectClasses)
-		mux.HandleFunc("GET /api/schema/objectclass/{name}", schemaBrowser.ObjectClassDetail)
-		mux.HandleFunc("GET /api/schema/attribute", schemaBrowser.Attributes)
-		mux.HandleFunc("GET /api/schema/attribute/{name}", schemaBrowser.AttributeDetail)
-		mux.HandleFunc("GET /api/template/{name}", entryHandler.CreateForm)
-		mux.HandleFunc("POST /api/template/{name}/create", entryHandler.CreateSubmit)
+		mux.HandleFunc("GET /schema/objectclass", schemaBrowser.ObjectClasses)
+		mux.HandleFunc("GET /schema/objectclass/{name}", schemaBrowser.ObjectClassDetail)
+		mux.HandleFunc("GET /schema/attribute", schemaBrowser.Attributes)
+		mux.HandleFunc("GET /schema/attribute/{name}", schemaBrowser.AttributeDetail)
+		mux.HandleFunc("GET /template/{name}", entryHandler.CreateForm)
+		mux.HandleFunc("POST /template/{name}/create", entryHandler.CreateSubmit)
+		mux.HandleFunc("GET /entry/{dn...}", func(w http.ResponseWriter, r *http.Request) {
+			entryDispatch(entryHandler, w, r)
+		})
+		mux.HandleFunc("POST /entry/{dn...}", func(w http.ResponseWriter, r *http.Request) {
+			entryDispatch(entryHandler, w, r)
+		})
+		// Photo streams binary image data, so it stays under /api while every
+		// other entry action renders a page under /entry/{dn...}.
 		mux.HandleFunc("GET /api/entry/{dn...}", func(w http.ResponseWriter, r *http.Request) {
-			entryDispatch(entryHandler, w, r)
+			apiEntryDispatch(entryHandler, w, r)
 		})
-		mux.HandleFunc("POST /api/entry/{dn...}", func(w http.ResponseWriter, r *http.Request) {
-			entryDispatch(entryHandler, w, r)
-		})
-		mux.HandleFunc("GET /api/import", importHandler.Form)
-		mux.HandleFunc("POST /api/import", importHandler.Submit)
+		mux.HandleFunc("GET /import", importHandler.Form)
+		mux.HandleFunc("POST /import", importHandler.Submit)
 		mux.HandleFunc("GET /api/import/report/{id}", importHandler.Report)
 		mux.HandleFunc("GET /api/export", exportHandler.Export)
-		mux.HandleFunc("GET /api/search", searchHandler.Search)
+		mux.HandleFunc("GET /search", searchHandler.Search)
 	}
 
 	var h http.Handler = mux
@@ -136,16 +143,12 @@ func treeDispatch(t *tree.Tree, w http.ResponseWriter, r *http.Request) {
 	t.Children(w, r)
 }
 
-// entryDispatch routes /api/entry/{dn...} and its /password /delete /rename
+// entryDispatch routes /entry/{dn...} and its /edit /password /delete /rename
 // action suffixes by method (wildcards must end the pattern, so the action is
 // parsed from the last path segment). DNs containing "/" are not supported.
 func entryDispatch(h *entry.Handler, w http.ResponseWriter, r *http.Request) {
-	rest := strings.TrimPrefix(r.URL.Path, "/api/entry/")
-	dn := rest
-	action := ""
-	if i := strings.LastIndexByte(rest, '/'); i >= 0 {
-		dn, action = rest[:i], rest[i+1:]
-	}
+	rest := strings.TrimPrefix(r.URL.Path, "/entry/")
+	dn, action := parseEntryAction(rest)
 	r.SetPathValue("dn", dn)
 	switch action {
 	case "password":
@@ -172,15 +175,37 @@ func entryDispatch(h *entry.Handler, w http.ResponseWriter, r *http.Request) {
 		} else {
 			h.EditForm(w, r)
 		}
-	case "photo":
-		if r.Method != http.MethodGet {
-			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		h.Photo(w, r)
 	case "":
 		h.Detail(w, r)
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// apiEntryDispatch serves the only /api/entry route: GET
+// /api/entry/{dn...}/photo streams a stored jpegPhoto as image data. The
+// remaining entry actions render pages and live under /entry/{dn...}.
+func apiEntryDispatch(h *entry.Handler, w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/api/entry/")
+	dn, action := parseEntryAction(rest)
+	if action != "photo" {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.SetPathValue("dn", dn)
+	h.Photo(w, r)
+}
+
+// parseEntryAction splits the trailing action suffix ("" | edit | password |
+// delete | rename | photo) from the entry DN.
+func parseEntryAction(rest string) (dn, action string) {
+	dn = rest
+	if i := strings.LastIndexByte(rest, '/'); i >= 0 {
+		dn, action = rest[:i], rest[i+1:]
+	}
+	return dn, action
 }

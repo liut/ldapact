@@ -2,7 +2,7 @@
 <nav aria-label="Breadcrumb">
   <ol class="breadcrumbs">
     {{range .Crumbs}}
-    <li>{{if .DN}}<a href="/api/entry/{{.DN | urlquery}}">{{.Label}}</a>{{else}}<span aria-hidden="true">{{.Label}}</span>{{end}}</li>
+    <li>{{if .DN}}<a href="/entry/{{.DN | urlquery}}">{{.Label}}</a>{{else}}<span aria-hidden="true">{{.Label}}</span>{{end}}</li>
     {{end}}
   </ol>
 </nav>
@@ -25,12 +25,12 @@
   </table>
   <h2>Actions</h2>
   <ul class="actions">
-    <li><a class="secondary" href="/api/entry/{{.DN | urlquery}}/edit">Edit attributes — {{.EditTemplate}}</a></li>
+    <li><a class="secondary" href="/entry/{{.DN | urlquery}}/edit">Edit attributes — {{.EditTemplate}}</a></li>
     {{if .HasPassword}}
-    <li><a class="secondary" href="/api/entry/{{.DN | urlquery}}/password">Change password{{if .PasswordScheme}} (current: {{.PasswordScheme}}){{end}}</a></li>
+    <li><a class="secondary" href="/entry/{{.DN | urlquery}}/password">Change password{{if .PasswordScheme}} (current: {{.PasswordScheme}}){{end}}</a></li>
     {{end}}
-    <li><a class="secondary" href="/api/entry/{{.DN | urlquery}}/rename">Rename / move</a></li>
-    <li><a class="secondary" href="/api/entry/{{.DN | urlquery}}/delete">Delete</a></li>
+    <li><a class="secondary" href="/entry/{{.DN | urlquery}}/rename">Rename / move</a></li>
+    <li><a class="secondary" href="/entry/{{.DN | urlquery}}/delete">Delete</a></li>
     <li><a class="secondary" href="/api/export?dn={{.DN | urlquery}}&amp;scope=entry">Export LDIF</a></li>
   </ul>
 </section>

@@ -231,7 +231,7 @@ func TestCreateFormRenders(t *testing.T) {
 	}
 	h := testHandler(t, fake)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/template/posixAccount", nil)
+	req := httptest.NewRequest(http.MethodGet, "/template/posixAccount", nil)
 	req.SetPathValue("name", "posixAccount")
 	h.CreateForm(rr, req)
 	if rr.Code != http.StatusOK {
@@ -279,7 +279,7 @@ func TestCreateSubmitSuccess(t *testing.T) {
 		"loginShell":    {"/bin/bash"},
 	}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/template/posixAccount/create", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/template/posixAccount/create", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("name", "posixAccount")
 	h.CreateSubmit(rr, req)
@@ -309,7 +309,7 @@ func TestCreateSubmitMissingRequired(t *testing.T) {
 	h := testHandler(t, fake)
 	form := url.Values{"container": {"dc=example,dc=com"}, "givenName": {"Alice"}}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/template/posixAccount/create", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/template/posixAccount/create", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("name", "posixAccount")
 	h.CreateSubmit(rr, req)
@@ -333,7 +333,7 @@ func TestCreateSubmitAddFailure(t *testing.T) {
 		"homeDirectory": {"/home/ab"},
 	}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/template/posixAccount/create", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/template/posixAccount/create", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("name", "posixAccount")
 	h.CreateSubmit(rr, req)
@@ -352,7 +352,7 @@ func TestDetail(t *testing.T) {
 	}
 	h := testHandler(t, fake)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/entry/cn=alice,ou=People,dc=example,dc=com", nil)
+	req := httptest.NewRequest(http.MethodGet, "/entry/cn=alice,ou=People,dc=example,dc=com", nil)
 	req.SetPathValue("dn", "cn=alice,ou=People,dc=example,dc=com")
 	h.Detail(rr, req)
 	body := rr.Body.String()
@@ -378,7 +378,7 @@ func TestDetailNotFound(t *testing.T) {
 	}
 	h := testHandler(t, fake)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/entry/x", nil)
+	req := httptest.NewRequest(http.MethodGet, "/entry/x", nil)
 	req.SetPathValue("dn", "x")
 	h.Detail(rr, req)
 	if rr.Code != http.StatusNotFound {
@@ -403,7 +403,7 @@ func TestPasswordChangeSuccess(t *testing.T) {
 	h := testHandler(t, fake)
 	form := url.Values{"new_password": {"NewPass#2026"}, "confirm_password": {"NewPass#2026"}}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=alice,ou=People,dc=example,dc=com/password", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=alice,ou=People,dc=example,dc=com/password", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=alice,ou=People,dc=example,dc=com")
 	h.PasswordChange(rr, req)
@@ -427,7 +427,7 @@ func TestPasswordChangeMismatch(t *testing.T) {
 	h := testHandler(t, fake)
 	form := url.Values{"new_password": {"a"}, "confirm_password": {"b"}}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/x/password", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/x/password", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "x")
 	h.PasswordChange(rr, req)
@@ -451,7 +451,7 @@ func TestDeleteLeaf(t *testing.T) {
 	h := testHandler(t, fake)
 	form := url.Values{"confirm_dn": {"cn=alice,ou=People,dc=example,dc=com"}}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=alice,ou=People,dc=example,dc=com/delete", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=alice,ou=People,dc=example,dc=com/delete", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=alice,ou=People,dc=example,dc=com")
 	h.DeleteSubmit(rr, req)
@@ -478,7 +478,7 @@ func TestDeleteNonLeafBlocked(t *testing.T) {
 	h := testHandler(t, fake)
 	form := url.Values{"confirm_dn": {"ou=People,dc=example,dc=com"}}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/ou=People,dc=example,dc=com/delete", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/ou=People,dc=example,dc=com/delete", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "ou=People,dc=example,dc=com")
 	h.DeleteSubmit(rr, req)
@@ -505,7 +505,7 @@ func TestDeleteNonLeafRecursiveStillBlocked(t *testing.T) {
 	h := testHandler(t, fake)
 	form := url.Values{"confirm_dn": {"ou=People,dc=example,dc=com"}, "recursive": {"1"}}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/ou=People,dc=example,dc=com/delete", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/ou=People,dc=example,dc=com/delete", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "ou=People,dc=example,dc=com")
 	h.DeleteSubmit(rr, req)
@@ -532,7 +532,7 @@ func TestRenameSuccess(t *testing.T) {
 	h := testHandler(t, fake)
 	form := url.Values{"new_rdn": {"cn=robert"}, "delete_old_rdn": {"1"}}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=bob,ou=People,dc=example,dc=com/rename", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=bob,ou=People,dc=example,dc=com/rename", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=bob,ou=People,dc=example,dc=com")
 	h.RenameSubmit(rr, req)
@@ -557,7 +557,7 @@ func TestRenameTargetParentMissing(t *testing.T) {
 	h := testHandler(t, fake)
 	form := url.Values{"new_rdn": {"cn=robert"}, "new_superior": {"ou=Archive,dc=example,dc=com"}}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=bob,dc=example,dc=com/rename", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=bob,dc=example,dc=com/rename", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=bob,dc=example,dc=com")
 	h.RenameSubmit(rr, req)
@@ -629,7 +629,7 @@ func TestEditFormInetOrgPerson(t *testing.T) {
 	}
 	h := testHandler(t, fake)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/entry/cn=alice,ou=People,dc=example,dc=com/edit", nil)
+	req := httptest.NewRequest(http.MethodGet, "/entry/cn=alice,ou=People,dc=example,dc=com/edit", nil)
 	req.SetPathValue("dn", "cn=alice,ou=People,dc=example,dc=com")
 	h.EditForm(rr, req)
 	if rr.Code != http.StatusOK {
@@ -672,7 +672,7 @@ func TestEditFormPosixGroupMultiValue(t *testing.T) {
 	}
 	h := testHandler(t, fake)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/entry/cn=staff,ou=Groups,dc=example,dc=com/edit", nil)
+	req := httptest.NewRequest(http.MethodGet, "/entry/cn=staff,ou=Groups,dc=example,dc=com/edit", nil)
 	req.SetPathValue("dn", "cn=staff,ou=Groups,dc=example,dc=com")
 	h.EditForm(rr, req)
 	body := rr.Body.String()
@@ -698,7 +698,7 @@ func TestEditFormGenericFallback(t *testing.T) {
 	}
 	h := testHandler(t, fake)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/entry/ou=People,dc=example,dc=com/edit", nil)
+	req := httptest.NewRequest(http.MethodGet, "/entry/ou=People,dc=example,dc=com/edit", nil)
 	req.SetPathValue("dn", "ou=People,dc=example,dc=com")
 	h.EditForm(rr, req)
 	body := rr.Body.String()
@@ -721,7 +721,7 @@ func TestEditFormForcedTemplate(t *testing.T) {
 	}
 	h := testHandler(t, fake)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/entry/cn=alice,ou=People,dc=example,dc=com/edit?template=posixGroup", nil)
+	req := httptest.NewRequest(http.MethodGet, "/entry/cn=alice,ou=People,dc=example,dc=com/edit?template=posixGroup", nil)
 	req.SetPathValue("dn", "cn=alice,ou=People,dc=example,dc=com")
 	h.EditForm(rr, req)
 	body := rr.Body.String()
@@ -739,7 +739,7 @@ func TestEditFormNotFound(t *testing.T) {
 	}
 	h := testHandler(t, fake)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/entry/cn=missing,dc=example,dc=com/edit", nil)
+	req := httptest.NewRequest(http.MethodGet, "/entry/cn=missing,dc=example,dc=com/edit", nil)
 	req.SetPathValue("dn", "cn=missing,dc=example,dc=com")
 	h.EditForm(rr, req)
 	if rr.Code != http.StatusNotFound {
@@ -766,7 +766,7 @@ func TestDetailPasswordActionGated(t *testing.T) {
 			}
 			h := testHandler(t, fake)
 			rr := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodGet, "/api/entry/"+tc.entry.DN, nil)
+			req := httptest.NewRequest(http.MethodGet, "/entry/"+tc.entry.DN, nil)
 			req.SetPathValue("dn", tc.entry.DN)
 			h.Detail(rr, req)
 			body := rr.Body.String()
@@ -795,7 +795,7 @@ func TestPasswordRouteGated(t *testing.T) {
 	h := testHandler(t, fake)
 
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/entry/ou=People,dc=example,dc=com/password", nil)
+	req := httptest.NewRequest(http.MethodGet, "/entry/ou=People,dc=example,dc=com/password", nil)
 	req.SetPathValue("dn", "ou=People,dc=example,dc=com")
 	h.PasswordForm(rr, req)
 	if !strings.Contains(rr.Body.String(), "no userPassword") {
@@ -803,7 +803,7 @@ func TestPasswordRouteGated(t *testing.T) {
 	}
 
 	rr = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/entry/ou=People,dc=example,dc=com/password",
+	req = httptest.NewRequest(http.MethodPost, "/entry/ou=People,dc=example,dc=com/password",
 		strings.NewReader(url.Values{"new_password": {"x"}, "confirm_password": {"x"}}.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "ou=People,dc=example,dc=com")
@@ -825,7 +825,7 @@ func TestEditFormTemplateParseFailure(t *testing.T) {
 	}
 	h := testHandler(t, fake)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/entry/cn=alice,ou=People,dc=example,dc=com/edit?template=missing", nil)
+	req := httptest.NewRequest(http.MethodGet, "/entry/cn=alice,ou=People,dc=example,dc=com/edit?template=missing", nil)
 	req.SetPathValue("dn", "cn=alice,ou=People,dc=example,dc=com")
 	h.EditForm(rr, req)
 	if rr.Code != http.StatusInternalServerError || !strings.Contains(rr.Body.String(), "missing") {
@@ -843,7 +843,7 @@ func TestEditFormSchemaControls(t *testing.T) {
 	}
 	h := testHandler(t, fake)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", nil)
+	req := httptest.NewRequest(http.MethodGet, "/entry/cn=carol,ou=People,dc=example,dc=com/edit", nil)
 	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
 	h.EditForm(rr, req)
 	if rr.Code != http.StatusOK {
@@ -895,7 +895,7 @@ func TestEditFormTemplateRequiredMarkers(t *testing.T) {
 	}
 	h := testHandler(t, fake)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/entry/cn=alice,ou=People,dc=example,dc=com/edit", nil)
+	req := httptest.NewRequest(http.MethodGet, "/entry/cn=alice,ou=People,dc=example,dc=com/edit", nil)
 	req.SetPathValue("dn", "cn=alice,ou=People,dc=example,dc=com")
 	h.EditForm(rr, req)
 	body := rr.Body.String()
@@ -927,7 +927,7 @@ func TestEditFormBooleanLowercase(t *testing.T) {
 	}
 	h := testHandler(t, fake)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", nil)
+	req := httptest.NewRequest(http.MethodGet, "/entry/cn=carol,ou=People,dc=example,dc=com/edit", nil)
 	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
 	h.EditForm(rr, req)
 	if rr.Code != http.StatusOK {
@@ -960,7 +960,7 @@ func TestEditFormBooleanUnchangedSubmit(t *testing.T) {
 		"stage":         {"apply"},
 	}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
 	h.EditSubmit(rr, req)
@@ -1008,7 +1008,7 @@ func TestEditMultiValueRemoveAllDeletes(t *testing.T) {
 		"stage":     {"apply"},
 	}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=staff,ou=Groups,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=staff,ou=Groups,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=staff,ou=Groups,dc=example,dc=com")
 	h.EditSubmit(rr, req)
@@ -1043,7 +1043,7 @@ func TestEditBooleanClear(t *testing.T) {
 		"stage":         {"apply"},
 	}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
 	h.EditSubmit(rr, req)
@@ -1073,7 +1073,7 @@ func TestEditSingleValueClear(t *testing.T) {
 	form.Set("mail", "")
 	form.Set("stage", "apply")
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=alice,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=alice,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=alice,ou=People,dc=example,dc=com")
 	h.EditSubmit(rr, req)
@@ -1117,7 +1117,7 @@ func TestEditMultiValueEmptyRowNoFabrication(t *testing.T) {
 		"stage":     {"apply"},
 	}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=staff,ou=Groups,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=staff,ou=Groups,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=staff,ou=Groups,dc=example,dc=com")
 	h.EditSubmit(rr, req)
@@ -1154,7 +1154,7 @@ func TestEditFormAddCandidates(t *testing.T) {
 	}
 	h := testHandler(t, fake)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", nil)
+	req := httptest.NewRequest(http.MethodGet, "/entry/cn=carol,ou=People,dc=example,dc=com/edit", nil)
 	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
 	h.EditForm(rr, req)
 	body := rr.Body.String()
@@ -1192,7 +1192,7 @@ func TestEditAddAttribute(t *testing.T) {
 		"stage":  {"review"},
 	}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
 	h.EditSubmit(rr, req)
@@ -1230,7 +1230,7 @@ func TestEditAddAttributeApply(t *testing.T) {
 		"stage":           {"apply"},
 	}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
 	h.EditSubmit(rr, req)
@@ -1273,7 +1273,7 @@ func TestEditAddAttributeInvalid(t *testing.T) {
 		"stage":         {"review"},
 	}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
 	h.EditSubmit(rr, req)
@@ -1308,7 +1308,7 @@ func TestEditAddObjectClassIgnoresStrayAddAttr(t *testing.T) {
 		"stage":         {"review"},
 	}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
 	h.EditSubmit(rr, req)
@@ -1342,7 +1342,7 @@ func TestEditReviewIgnoresStrayPickerValues(t *testing.T) {
 		"stage":         {"review"},
 	}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
 	h.EditSubmit(rr, req)
@@ -1369,7 +1369,7 @@ func TestEditTemplateMergesNonTemplateEntryAttributes(t *testing.T) {
 	}
 	h := testHandler(t, fake)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/entry/cn=alice,ou=People,dc=example,dc=com/edit", nil)
+	req := httptest.NewRequest(http.MethodGet, "/entry/cn=alice,ou=People,dc=example,dc=com/edit", nil)
 	req.SetPathValue("dn", "cn=alice,ou=People,dc=example,dc=com")
 	h.EditForm(rr, req)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "Generic: Address Book Entry") {
@@ -1397,7 +1397,7 @@ func TestEditDeleteAttributeButton(t *testing.T) {
 	}
 	h := testHandler(t, fake)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", nil)
+	req := httptest.NewRequest(http.MethodGet, "/entry/cn=carol,ou=People,dc=example,dc=com/edit", nil)
 	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
 	h.EditForm(rr, req)
 	body := rr.Body.String()
@@ -1434,7 +1434,7 @@ func TestEditFormObjectClassSection(t *testing.T) {
 	}
 	h := testHandler(t, fake)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", nil)
+	req := httptest.NewRequest(http.MethodGet, "/entry/cn=carol,ou=People,dc=example,dc=com/edit", nil)
 	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
 	h.EditForm(rr, req)
 	body := rr.Body.String()
@@ -1456,7 +1456,7 @@ func TestEditObjectClassRemoveBlockedByValues(t *testing.T) {
 	}
 	h := testHandler(t, fake)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/entry/uid=carol,ou=People,dc=example,dc=com/edit", nil)
+	req := httptest.NewRequest(http.MethodGet, "/entry/uid=carol,ou=People,dc=example,dc=com/edit", nil)
 	req.SetPathValue("dn", "uid=carol,ou=People,dc=example,dc=com")
 	h.EditForm(rr, req)
 	body := rr.Body.String()
@@ -1488,7 +1488,7 @@ func TestEditObjectClassAdd(t *testing.T) {
 		"stage":         {"review"},
 	}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
 	h.EditSubmit(rr, req)
@@ -1517,7 +1517,7 @@ func TestEditObjectClassAddStructuralRejected(t *testing.T) {
 		"stage":         {"review"},
 	}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
 	h.EditSubmit(rr, req)
@@ -1550,7 +1550,7 @@ func TestEditObjectClassRemove(t *testing.T) {
 		"stage":       {"review"},
 	}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/uid=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/uid=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "uid=carol,ou=People,dc=example,dc=com")
 	h.EditSubmit(rr, req)
@@ -1582,7 +1582,7 @@ func TestEditObjectClassRemoveWithValuesRejected(t *testing.T) {
 		"stage":         {"review"},
 	}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/uid=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/uid=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "uid=carol,ou=People,dc=example,dc=com")
 	h.EditSubmit(rr, req)
@@ -1614,7 +1614,7 @@ func TestEditObjectClassApply(t *testing.T) {
 		"stage":         {"apply"},
 	}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
 	h.EditSubmit(rr, req)
@@ -1657,7 +1657,7 @@ func TestEditObjectClassApplyStructuralRemovalRejected(t *testing.T) {
 		"stage":         {"apply"},
 	}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
 	h.EditSubmit(rr, req)
@@ -1692,7 +1692,7 @@ func multipartEditForm(t *testing.T, fields url.Values, files map[string][]byte)
 	if err := mw.Close(); err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", &buf)
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=carol,ou=People,dc=example,dc=com/edit", &buf)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
 	return req
@@ -1760,7 +1760,7 @@ func TestEditBinaryUploadApply(t *testing.T) {
 		"stage":                  {"apply"},
 	}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
 	h.EditSubmit(rr, req)
@@ -1831,7 +1831,7 @@ func TestEditBinaryUploadInvalidToken(t *testing.T) {
 		"stage":                  {"apply"},
 	}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
 	h.EditSubmit(rr, req)
@@ -1862,7 +1862,7 @@ func TestEditRequiredClearRejected(t *testing.T) {
 		"stage": {"apply"},
 	}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
 	h.EditSubmit(rr, req)
@@ -1905,7 +1905,7 @@ func TestEditRequiredMultiRemoveAllRejected(t *testing.T) {
 		"stage": {"apply"},
 	}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=team,ou=Groups,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=team,ou=Groups,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=team,ou=Groups,dc=example,dc=com")
 	h.EditSubmit(rr, req)
@@ -1959,7 +1959,7 @@ func TestEditReviewAndApply(t *testing.T) {
 	form.Set("mail", "alice@new.example.com")
 	form.Set("stage", "review")
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=alice,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=alice,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=alice,ou=People,dc=example,dc=com")
 	h.EditSubmit(rr, req)
@@ -1978,7 +1978,7 @@ func TestEditReviewAndApply(t *testing.T) {
 
 	form.Set("stage", "apply")
 	rr = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/entry/cn=alice,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req = httptest.NewRequest(http.MethodPost, "/entry/cn=alice,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=alice,ou=People,dc=example,dc=com")
 	h.EditSubmit(rr, req)
@@ -2026,7 +2026,7 @@ func TestEditClearAttribute(t *testing.T) {
 	form.Set("mail", "")
 	form.Set("stage", "apply")
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=alice,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=alice,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=alice,ou=People,dc=example,dc=com")
 	h.EditSubmit(rr, req)
@@ -2050,7 +2050,7 @@ func TestEditNoChangesShortCircuit(t *testing.T) {
 	form := editFormValues()
 	form.Set("stage", "apply")
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=alice,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=alice,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=alice,ou=People,dc=example,dc=com")
 	h.EditSubmit(rr, req)
@@ -2079,7 +2079,7 @@ func TestEditMultiValueReplace(t *testing.T) {
 		"stage":     {"apply"},
 	}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=staff,ou=Groups,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=staff,ou=Groups,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=staff,ou=Groups,dc=example,dc=com")
 	h.EditSubmit(rr, req)
@@ -2111,7 +2111,7 @@ func TestEditMultiValueDedupesSubmitted(t *testing.T) {
 		"stage":     {"apply"},
 	}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=staff,ou=Groups,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=staff,ou=Groups,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=staff,ou=Groups,dc=example,dc=com")
 	h.EditSubmit(rr, req)
@@ -2171,7 +2171,7 @@ func TestDetailRendersPhotos(t *testing.T) {
 	}
 	h := testHandler(t, fake)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/entry/cn=alice,ou=People,dc=example,dc=com", nil)
+	req := httptest.NewRequest(http.MethodGet, "/entry/cn=alice,ou=People,dc=example,dc=com", nil)
 	req.SetPathValue("dn", "cn=alice,ou=People,dc=example,dc=com")
 	h.Detail(rr, req)
 	body := rr.Body.String()
@@ -2201,7 +2201,7 @@ func TestEditFormPhotoPreviews(t *testing.T) {
 	}
 	h := testHandler(t, fake)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/entry/ou=People,dc=example,dc=com/edit", nil)
+	req := httptest.NewRequest(http.MethodGet, "/entry/ou=People,dc=example,dc=com/edit", nil)
 	req.SetPathValue("dn", "ou=People,dc=example,dc=com")
 	h.EditForm(rr, req)
 	body := rr.Body.String()
@@ -2284,7 +2284,7 @@ func TestEditLDAPFailureRerenders(t *testing.T) {
 	form.Set("mail", "alice@new.example.com")
 	form.Set("stage", "apply")
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=alice,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=alice,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=alice,ou=People,dc=example,dc=com")
 	h.EditSubmit(rr, req)
@@ -2316,7 +2316,7 @@ func TestEditAuditShape(t *testing.T) {
 	form.Set("mail", "alice@new.example.com")
 	form.Set("stage", "apply")
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=alice,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=alice,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=alice,ou=People,dc=example,dc=com")
 	h.EditSubmit(rr, req)
@@ -2340,7 +2340,7 @@ func TestDetailShowsEditLink(t *testing.T) {
 	}
 	h := testHandler(t, fake)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/entry/cn=alice,ou=People,dc=example,dc=com", nil)
+	req := httptest.NewRequest(http.MethodGet, "/entry/cn=alice,ou=People,dc=example,dc=com", nil)
 	req.SetPathValue("dn", "cn=alice,ou=People,dc=example,dc=com")
 	h.Detail(rr, req)
 	body := rr.Body.String()
@@ -2360,7 +2360,7 @@ func TestDetailGenericEditorLabel(t *testing.T) {
 	}
 	h := testHandler(t, fake)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/entry/ou=People,dc=example,dc=com", nil)
+	req := httptest.NewRequest(http.MethodGet, "/entry/ou=People,dc=example,dc=com", nil)
 	req.SetPathValue("dn", "ou=People,dc=example,dc=com")
 	h.Detail(rr, req)
 	if !strings.Contains(rr.Body.String(), "Edit attributes — generic editor") {
@@ -2392,7 +2392,7 @@ func TestEditTemplateExcludesPasswordAndBinary(t *testing.T) {
 	}
 	h := testHandlerWithLoader(t, fake, loader)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/entry/cn=alice,ou=People,dc=example,dc=com/edit?template=custom", nil)
+	req := httptest.NewRequest(http.MethodGet, "/entry/cn=alice,ou=People,dc=example,dc=com/edit?template=custom", nil)
 	req.SetPathValue("dn", "cn=alice,ou=People,dc=example,dc=com")
 	h.EditForm(rr, req)
 	body := rr.Body.String()
@@ -2434,7 +2434,7 @@ func TestEditForcedTemplateRoundTrip(t *testing.T) {
 		"stage":     {"review"},
 	}
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=alice,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/entry/cn=alice,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=alice,ou=People,dc=example,dc=com")
 	h.EditSubmit(rr, req)
@@ -2443,7 +2443,7 @@ func TestEditForcedTemplateRoundTrip(t *testing.T) {
 	}
 	form.Set("stage", "apply")
 	rr = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/entry/cn=alice,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req = httptest.NewRequest(http.MethodPost, "/entry/cn=alice,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetPathValue("dn", "cn=alice,ou=People,dc=example,dc=com")
 	h.EditSubmit(rr, req)

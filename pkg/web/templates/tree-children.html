@@ -14,7 +14,7 @@
 {{range $i, $n := .Nodes}}
 <li role="treeitem" aria-level="{{$n.Level}}" aria-setsize="{{$.SetSize}}" aria-posinset="{{add $i 1}}"
     data-dn="{{$n.DN}}" {{if $n.HasChildren}}aria-expanded="false"{{end}}>
-  <a class="tree-label" href="/api/entry/{{$n.DN | urlquery}}" title="{{$n.DN}}">{{$n.Label}}</a>
+  <a class="tree-label" href="/entry/{{$n.DN | urlquery}}" title="{{$n.DN}}">{{$n.Label}}</a>
   {{if $n.HasChildren}}
   <button type="button" class="tree-toggle" aria-label="Toggle children of {{$n.Label}}"
           hx-get="/api/tree/{{$n.DN | urlquery}}/children?page=1&amp;level={{add $n.Level 1}}&amp;id=children-{{$n.ID}}"

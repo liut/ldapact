@@ -30,7 +30,7 @@ type DetailAttr struct {
 	Kind string
 }
 
-// Detail handles GET /api/entry/{dn...}.
+// Detail handles GET /entry/{dn...}.
 func (h *Handler) Detail(w http.ResponseWriter, r *http.Request) {
 	dn := r.PathValue("dn")
 	if dn == "" {

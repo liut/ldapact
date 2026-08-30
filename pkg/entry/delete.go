@@ -20,7 +20,7 @@ type DeleteConfirmData struct {
 	Error      string
 }
 
-// DeleteForm handles GET /api/entry/{dn...}/delete (F5 confirmation).
+// DeleteForm handles GET /entry/{dn...}/delete (F5 confirmation).
 func (h *Handler) DeleteForm(w http.ResponseWriter, r *http.Request) {
 	dn := r.PathValue("dn")
 	count, err := h.childCount(r, dn)
@@ -34,7 +34,7 @@ func (h *Handler) DeleteForm(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// DeleteSubmit handles POST /api/entry/{dn...}/delete (F5). Deletion is
+// DeleteSubmit handles POST /entry/{dn...}/delete (F5). Deletion is
 // leaf-only (R13): an entry with children is blocked, never deleted.
 func (h *Handler) DeleteSubmit(w http.ResponseWriter, r *http.Request) {
 	dn := r.PathValue("dn")
@@ -63,7 +63,7 @@ func (h *Handler) DeleteSubmit(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Mutated-Subtree", parent)
 	h.renderPage(w, "Entry deleted — ldapact", "result-page", ResultData{
 		Title: "Entry deleted", Message: fmt.Sprintf("Deleted %s", dn),
-		Link: "/api/entry/" + url.PathEscape(parent), LinkText: "Back to parent",
+		Link: "/entry/" + url.PathEscape(parent), LinkText: "Back to parent",
 	})
 }
 

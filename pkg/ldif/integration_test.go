@@ -62,7 +62,7 @@ cn: bad
 	_, _ = fw.Write([]byte(ldifContent))
 	_ = mw.Close()
 	rr := httptest.NewRecorder()
-	impReq := httptest.NewRequest(http.MethodPost, "/api/import", &buf)
+	impReq := httptest.NewRequest(http.MethodPost, "/import", &buf)
 	impReq.Header.Set("Content-Type", mw.FormDataContentType())
 	imp.Submit(rr, impReq)
 	body := rr.Body.String()

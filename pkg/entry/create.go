@@ -53,7 +53,7 @@ type FormField struct {
 	Preview        string
 }
 
-// CreateForm handles GET /api/template/{name} (F2 form).
+// CreateForm handles GET /template/{name} (F2 form).
 func (h *Handler) CreateForm(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	tmpl, err := h.loader.Load(name)
@@ -94,7 +94,7 @@ func (h *Handler) CreateForm(w http.ResponseWriter, r *http.Request) {
 	h.renderPage(w, tmpl.Title+" — ldapact", "create-form-content", data)
 }
 
-// CreateSubmit handles POST /api/template/{name}/create (F2 submit).
+// CreateSubmit handles POST /template/{name}/create (F2 submit).
 func (h *Handler) CreateSubmit(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	tmpl, err := h.loader.Load(name)
@@ -163,7 +163,7 @@ func (h *Handler) CreateSubmit(w http.ResponseWriter, r *http.Request) {
 	h.renderPage(w, "Entry created — ldapact", "result-page", ResultData{
 		Title:    "Entry created",
 		Message:  fmt.Sprintf("Created %s", dn),
-		Link:     "/api/entry/" + url.PathEscape(dn),
+		Link:     "/entry/" + url.PathEscape(dn),
 		LinkText: "View entry",
 	})
 }

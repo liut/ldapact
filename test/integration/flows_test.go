@@ -55,10 +55,10 @@ func TestFlowF1TreeBrowse(t *testing.T) {
 			t.Errorf("home missing %q", want)
 		}
 	}
-	if !strings.Contains(home, `href="/api/schema/objectclass"`) {
+	if !strings.Contains(home, `href="/schema/objectclass"`) {
 		t.Error("home toolbar must link to the schema browser")
 	}
-	if !strings.Contains(home, `href="/api/entry/dc%3Dexample%2Cdc%3Dcom"`) {
+	if !strings.Contains(home, `href="/entry/dc%3Dexample%2Cdc%3Dcom"`) {
 		t.Error("home tree root must link to the detail page")
 	}
 
@@ -67,7 +67,7 @@ func TestFlowF1TreeBrowse(t *testing.T) {
 	if !strings.Contains(page1, ">People<") || !strings.Contains(page1, ">Groups<") {
 		t.Errorf("root children: %s", page1)
 	}
-	if !strings.Contains(page1, `href="/api/entry/ou%3DPeople%2Cdc%3Dexample%2Cdc%3Dcom"`) {
+	if !strings.Contains(page1, `href="/entry/ou%3DPeople%2Cdc%3Dexample%2Cdc%3Dcom"`) {
 		t.Error("tree children must link to the detail page")
 	}
 
@@ -91,14 +91,14 @@ func TestFlowF1TreeBrowse(t *testing.T) {
 
 // TestFlowF2CreateAE3: template form + create + bind (AE3) and audit (AE6).
 func TestFlowF2CreateAE3(t *testing.T) {
-	resp := do(t, http.MethodGet, "/api/template/posixAccount", nil)
+	resp := do(t, http.MethodGet, "/template/posixAccount", nil)
 	form := body(t, resp)
 	for _, want := range []string{"Generic: User Account", "uidNumber", "gidNumber", "LDAPAutofill.bind"} {
 		if !strings.Contains(form, want) {
 			t.Errorf("create form missing %q", want)
 		}
 	}
-	resp = do(t, http.MethodPost, "/api/template/posixAccount/create", url.Values{
+	resp = do(t, http.MethodPost, "/template/posixAccount/create", url.Values{
 		"container": {"ou=People,dc=example,dc=com"},
 		"givenName": {"Smoke"}, "sn": {"One"}, "cn": {"smoke1"}, "uid": {"smoke1"},
 		"userPassword": {"Smoke#2026"}, "homeDirectory": {"/home/smoke1"},
@@ -122,7 +122,7 @@ func TestFlowF2CreateAE3(t *testing.T) {
 
 // TestFlowF3PasswordAE4: change password then bind with the new one.
 func TestFlowF3PasswordAE4(t *testing.T) {
-	resp := do(t, http.MethodPost, "/api/entry/uid=u0001,ou=People,dc=example,dc=com/password", url.Values{
+	resp := do(t, http.MethodPost, "/entry/uid=u0001,ou=People,dc=example,dc=com/password", url.Values{
 		"new_password": {"Changed#2026"}, "confirm_password": {"Changed#2026"},
 	})
 	if !strings.Contains(body(t, resp), "Password changed") {
@@ -154,7 +154,7 @@ objectClass: inetOrgPerson
 cn: badimport
 `))
 	_ = mw.Close()
-	req, _ := http.NewRequest(http.MethodPost, serverURL()+"/api/import", &buf)
+	req, _ := http.NewRequest(http.MethodPost, serverURL()+"/import", &buf)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	req.Header.Set("Origin", serverURL())
 	resp, err := client().Do(req)
@@ -170,13 +170,13 @@ cn: badimport
 
 // TestFlowF5F6: rename then delete the renamed entry.
 func TestFlowF5F6(t *testing.T) {
-	resp := do(t, http.MethodPost, "/api/entry/uid=u0002,ou=People,dc=example,dc=com/rename", url.Values{
+	resp := do(t, http.MethodPost, "/entry/uid=u0002,ou=People,dc=example,dc=com/rename", url.Values{
 		"new_rdn": {"uid=u0002r"}, "delete_old_rdn": {"1"},
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("rename = %d: %s", resp.StatusCode, body(t, resp))
 	}
-	resp = do(t, http.MethodPost, "/api/entry/uid=u0002r,ou=People,dc=example,dc=com/delete", url.Values{
+	resp = do(t, http.MethodPost, "/entry/uid=u0002r,ou=People,dc=example,dc=com/delete", url.Values{
 		"confirm_dn": {"uid=u0002r,ou=People,dc=example,dc=com"},
 	})
 	if resp.StatusCode != http.StatusOK {
@@ -192,12 +192,12 @@ func TestFlowF7F8(t *testing.T) {
 		t.Errorf("export missing imported entry: %.300s", export)
 	}
 
-	resp = do(t, http.MethodGet, "/api/search?q=(uid=u0001)&scope=subtree", nil)
+	resp = do(t, http.MethodGet, "/search?q=(uid=u0001)&scope=subtree", nil)
 	search := body(t, resp)
 	if !strings.Contains(search, "uid=u0001,ou=People,dc=example,dc=com") {
 		t.Errorf("search missing result: %.300s", search)
 	}
-	resp = do(t, http.MethodGet, "/api/search?q=(uid=u0001", nil)
+	resp = do(t, http.MethodGet, "/search?q=(uid=u0001", nil)
 	if !strings.Contains(body(t, resp), "filter syntax error at position") {
 		t.Error("invalid filter feedback missing")
 	}
@@ -209,14 +209,14 @@ func TestFlowEditSearch(t *testing.T) {
 	dn := "uid=u0005,ou=People,dc=example,dc=com"
 
 	// Detail page names the matched modification template.
-	resp := do(t, http.MethodGet, "/api/entry/"+dn, nil)
+	resp := do(t, http.MethodGet, "/entry/"+dn, nil)
 	detailBody := body(t, resp)
 	if resp.StatusCode != http.StatusOK || !strings.Contains(detailBody, "Generic: Address Book Entry") || !strings.Contains(detailBody, "/edit") {
 		t.Fatalf("detail edit entry point missing (status %d): %.300s", resp.StatusCode, detailBody)
 	}
 
 	// Edit form renders with the template.
-	resp = do(t, http.MethodGet, "/api/entry/"+dn+"/edit", nil)
+	resp = do(t, http.MethodGet, "/entry/"+dn+"/edit", nil)
 	editForm := body(t, resp)
 	if resp.StatusCode != http.StatusOK || !strings.Contains(editForm, "Generic: Address Book Entry") {
 		t.Fatalf("edit form = %d: %.300s", resp.StatusCode, editForm)
@@ -228,7 +228,7 @@ func TestFlowEditSearch(t *testing.T) {
 
 	// Generic editor (ou=People matches no modification template) exposes
 	// the add-attribute picker and the objectClass section.
-	resp = do(t, http.MethodGet, "/api/entry/ou=People,dc=example,dc=com/edit", nil)
+	resp = do(t, http.MethodGet, "/entry/ou=People,dc=example,dc=com/edit", nil)
 	genericForm := body(t, resp)
 	if resp.StatusCode != http.StatusOK || !strings.Contains(genericForm, "the generic editor") {
 		t.Fatalf("generic edit form = %d: %.300s", resp.StatusCode, genericForm)
@@ -259,13 +259,13 @@ func TestFlowEditSearch(t *testing.T) {
 		"homeDirectory":            {"/home/u0005"},
 		"stage":                    {"review"},
 	}
-	resp = do(t, http.MethodPost, "/api/entry/"+dn+"/edit", form)
+	resp = do(t, http.MethodPost, "/entry/"+dn+"/edit", form)
 	review := body(t, resp)
 	if !strings.Contains(review, "Review changes") || !strings.Contains(review, "u0005@example.com") {
 		t.Fatalf("review = %d: %.400s", resp.StatusCode, review)
 	}
 	form.Set("stage", "apply")
-	resp = do(t, http.MethodPost, "/api/entry/"+dn+"/edit", form)
+	resp = do(t, http.MethodPost, "/entry/"+dn+"/edit", form)
 	if resp.StatusCode != http.StatusOK || !strings.Contains(body(t, resp), "Entry updated") {
 		t.Fatalf("apply = %d: %.400s", resp.StatusCode, body(t, resp))
 	}
@@ -278,21 +278,21 @@ func TestFlowEditSearch(t *testing.T) {
 	}
 
 	// Base scope returns the edited entry only.
-	resp = do(t, http.MethodGet, "/api/search?q=(mail=u0005@example.com)&scope=base&base="+url.QueryEscape(dn), nil)
+	resp = do(t, http.MethodGet, "/search?q=(mail=u0005@example.com)&scope=base&base="+url.QueryEscape(dn), nil)
 	search := body(t, resp)
 	if resp.StatusCode != http.StatusOK || !strings.Contains(search, "u0005@example.com") {
 		t.Fatalf("base search = %d: %.300s", resp.StatusCode, search)
 	}
 
 	// One level under ou=People returns direct children only.
-	resp = do(t, http.MethodGet, "/api/search?q=(objectClass=*)&scope=one&base="+url.QueryEscape("ou=People,dc=example,dc=com"), nil)
+	resp = do(t, http.MethodGet, "/search?q=(objectClass=*)&scope=one&base="+url.QueryEscape("ou=People,dc=example,dc=com"), nil)
 	search = body(t, resp)
 	if !strings.Contains(search, "uid=u0001") || strings.Contains(search, ">dc=example,dc=com<") {
 		t.Errorf("one-level scope wrong: %.300s", search)
 	}
 
 	// Sort: dn desc orders the page newest-first (client-side default sort).
-	resp = do(t, http.MethodGet, "/api/search?q=(uid=u00*)&scope=one&base="+url.QueryEscape("ou=People,dc=example,dc=com")+"&sort=dn&dir=desc", nil)
+	resp = do(t, http.MethodGet, "/search?q=(uid=u00*)&scope=one&base="+url.QueryEscape("ou=People,dc=example,dc=com")+"&sort=dn&dir=desc", nil)
 	search = body(t, resp)
 	if resp.StatusCode != http.StatusOK || !strings.Contains(search, "uid=u0001") || !strings.Contains(search, "uid=u0050") {
 		t.Fatalf("sorted search = %d: %.300s", resp.StatusCode, search)
@@ -303,7 +303,7 @@ func TestFlowEditSearch(t *testing.T) {
 
 	// Server-side sort control with fallback: modified desc must still return
 	// a usable page even when the directory rejects RFC 2891 sorting.
-	resp = do(t, http.MethodGet, "/api/search?q=(uid=u0001)&sort=modified&dir=desc", nil)
+	resp = do(t, http.MethodGet, "/search?q=(uid=u0001)&sort=modified&dir=desc", nil)
 	if resp.StatusCode != http.StatusOK || !strings.Contains(body(t, resp), "uid=u0001") {
 		t.Fatalf("modified sort search = %d: %.300s", resp.StatusCode, body(t, resp))
 	}

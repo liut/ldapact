@@ -80,7 +80,7 @@ func NewSchemaBrowser(client Lister, renderer *web.Renderer) *SchemaBrowser {
 	return &SchemaBrowser{client: client, render: renderer}
 }
 
-// ObjectClasses handles GET /api/schema/objectclass.
+// ObjectClasses handles GET /schema/objectclass.
 func (s *SchemaBrowser) ObjectClasses(w http.ResponseWriter, r *http.Request) {
 	schema := s.client.Schema()
 	if schema == nil {
@@ -99,13 +99,13 @@ func (s *SchemaBrowser) ObjectClasses(w http.ResponseWriter, r *http.Request) {
 			Name: name,
 			Kind: oc.Kind,
 			Desc: oc.Desc,
-			URL:  "/api/schema/objectclass/" + url.PathEscape(name),
+			URL:  "/schema/objectclass/" + url.PathEscape(name),
 		})
 	}
 	s.renderPage(w, "Object Classes — ldapact", "schema-list-content", SchemaListData{Title: "Object Classes", Rows: rows})
 }
 
-// ObjectClassDetail handles GET /api/schema/objectclass/{name}.
+// ObjectClassDetail handles GET /schema/objectclass/{name}.
 func (s *SchemaBrowser) ObjectClassDetail(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	schema := s.client.Schema()
@@ -129,17 +129,17 @@ func (s *SchemaBrowser) ObjectClassDetail(w http.ResponseWriter, r *http.Request
 	for _, sup := range oc.Sup {
 		data.Sup = append(data.Sup, SchemaLink{
 			Name: sup,
-			URL:  "/api/schema/objectclass/" + url.PathEscape(sup),
+			URL:  "/schema/objectclass/" + url.PathEscape(sup),
 		})
 	}
 	if strings.EqualFold(oc.Name, "top") {
 		// phpLDAPadmin renders every class as a child of top.
-		data.Children = []SchemaLink{{Name: "all", URL: "/api/schema/objectclass"}}
+		data.Children = []SchemaLink{{Name: "all", URL: "/schema/objectclass"}}
 	} else {
 		for _, child := range schema.ChildObjectClasses(oc.Name) {
 			data.Children = append(data.Children, SchemaLink{
 				Name: child,
-				URL:  "/api/schema/objectclass/" + url.PathEscape(child),
+				URL:  "/schema/objectclass/" + url.PathEscape(child),
 			})
 		}
 	}
@@ -155,16 +155,16 @@ func schemaAttrLinks(attrs []ldapx.ObjectClassAttr, current string) []SchemaAttr
 	for _, a := range attrs {
 		links = append(links, SchemaAttrLink{
 			Name:      a.Name,
-			URL:       "/api/schema/attribute/" + url.PathEscape(a.Name),
+			URL:       "/schema/attribute/" + url.PathEscape(a.Name),
 			Source:    a.Source,
-			SourceURL: "/api/schema/objectclass/" + url.PathEscape(a.Source),
+			SourceURL: "/schema/objectclass/" + url.PathEscape(a.Source),
 			Inherited: !strings.EqualFold(a.Source, current),
 		})
 	}
 	return links
 }
 
-// Attributes handles GET /api/schema/attribute.
+// Attributes handles GET /schema/attribute.
 func (s *SchemaBrowser) Attributes(w http.ResponseWriter, r *http.Request) {
 	schema := s.client.Schema()
 	if schema == nil {
@@ -187,13 +187,13 @@ func (s *SchemaBrowser) Attributes(w http.ResponseWriter, r *http.Request) {
 			Name: name,
 			Kind: kind,
 			Desc: at.Desc,
-			URL:  "/api/schema/attribute/" + url.PathEscape(name),
+			URL:  "/schema/attribute/" + url.PathEscape(name),
 		})
 	}
 	s.renderPage(w, "Attribute Types — ldapact", "schema-list-content", SchemaListData{Title: "Attribute Types", Rows: rows})
 }
 
-// AttributeDetail handles GET /api/schema/attribute/{name}.
+// AttributeDetail handles GET /schema/attribute/{name}.
 func (s *SchemaBrowser) AttributeDetail(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	schema := s.client.Schema()
@@ -230,19 +230,19 @@ func (s *SchemaBrowser) AttributeDetail(w http.ResponseWriter, r *http.Request) 
 		}
 		data.Sup = append(data.Sup, SchemaLink{
 			Name: supName,
-			URL:  "/api/schema/attribute/" + url.PathEscape(supName),
+			URL:  "/schema/attribute/" + url.PathEscape(supName),
 		})
 	}
 	for _, alias := range at.Names[1:] {
 		data.Aliases = append(data.Aliases, SchemaLink{
 			Name: alias,
-			URL:  "/api/schema/attribute/" + url.PathEscape(alias),
+			URL:  "/schema/attribute/" + url.PathEscape(alias),
 		})
 	}
 	for _, oc := range schema.ObjectClassesUsing(at.Name) {
 		data.UsedBy = append(data.UsedBy, SchemaLink{
 			Name: oc,
-			URL:  "/api/schema/objectclass/" + url.PathEscape(oc),
+			URL:  "/schema/objectclass/" + url.PathEscape(oc),
 		})
 	}
 	s.renderPage(w, name+" — ldapact", "schema-detail-content", data)

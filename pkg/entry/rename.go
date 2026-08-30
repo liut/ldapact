@@ -21,7 +21,7 @@ type RenameFormData struct {
 	Crumbs       []tree.Crumb
 }
 
-// RenameForm handles GET /api/entry/{dn...}/rename.
+// RenameForm handles GET /entry/{dn...}/rename.
 func (h *Handler) RenameForm(w http.ResponseWriter, r *http.Request) {
 	dn := r.PathValue("dn")
 	h.renderPage(w, "Rename entry — ldapact", "rename-form-content", RenameFormData{
@@ -30,7 +30,7 @@ func (h *Handler) RenameForm(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// RenameSubmit handles POST /api/entry/{dn...}/rename (F6).
+// RenameSubmit handles POST /entry/{dn...}/rename (F6).
 func (h *Handler) RenameSubmit(w http.ResponseWriter, r *http.Request) {
 	dn := r.PathValue("dn")
 	if err := r.ParseForm(); err != nil {
@@ -90,7 +90,7 @@ func (h *Handler) RenameSubmit(w http.ResponseWriter, r *http.Request) {
 	h.renderPage(w, "Entry renamed — ldapact", "result-page", ResultData{
 		Title:    "Entry renamed",
 		Message:  fmt.Sprintf("Renamed to %s", newDN),
-		Link:     "/api/entry/" + url.PathEscape(newDN),
+		Link:     "/entry/" + url.PathEscape(newDN),
 		LinkText: "View entry",
 	})
 }

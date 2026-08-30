@@ -180,23 +180,35 @@ dispatch now parses `/children`, `/password`, `/delete`, `/rename` suffixes),
 and LDAP paged-result sessions are connection-scoped, so `Page` now pins one
 pooled connection for the whole multi-page loop.
 
-## API surface
+## Routes
 
-The phpLDAPadmin 60+ PHP entry points collapse to ~13 REST routes:
+The phpLDAPadmin 60+ PHP entry points collapse to a small route set. Full
+pages render under their plain path; the `/api` prefix is reserved for
+endpoints that return data (images, LDIF, report files) or HTMX fragments:
+
+### Pages
 
 | Method + path | Flow |
 |---|---|
-| `GET /api/tree/{dn...}/children?page=N` | F1 |
-| `GET /api/entry/{dn...}` | F-Detail |
-| `GET /api/template/{name}` · `POST /api/template/{name}/create` | F2 |
-| `POST /api/entry/{dn...}/password` | F3 |
-| `POST /api/entry/{dn...}/delete` | F5 |
-| `POST /api/entry/{dn...}/rename` | F6 |
-| `GET/POST /api/entry/{dn...}/edit` | edit attributes (stage=review\|apply); controls render per the LDAP schema |
-| `POST /api/import` · `GET /api/import/report/{id}` | F4 |
-| `GET /api/export?dn=...&scope=entry\|subtree` | F7 |
-| `GET /api/search?q=...&scope=base\|one\|subtree\|global&sort=dn\|objectclass\|modified&dir=asc\|desc&size_limit=&time_limit=&attrs=cn,mail&page=N` | F8 |
-| `GET /api/schema/objectclass[/{name}]` · `GET /api/schema/attribute[/{name}]` | R5 |
+| `GET /` | F1 tree home |
+| `GET /search?q=...&scope=base\|one\|subtree\|global&sort=dn\|objectclass\|modified&dir=asc\|desc&size_limit=&time_limit=&attrs=cn,mail&page=N` | F8 |
+| `GET /schema/objectclass[/{name}]` · `GET /schema/attribute[/{name}]` | R5 |
+| `GET /template/{name}` · `POST /template/{name}/create` | F2 |
+| `GET /entry/{dn...}` | F-Detail |
+| `GET/POST /entry/{dn...}/edit` | edit attributes (stage=review\|apply); controls render per the LDAP schema |
+| `GET/POST /entry/{dn...}/password` | F3 |
+| `GET/POST /entry/{dn...}/delete` | F5 |
+| `GET/POST /entry/{dn...}/rename` | F6 |
+| `GET /import` · `POST /import` | F4 |
+
+### API (data / fragments)
+
+| Method + path | Flow |
+|---|---|
+| `GET /api/tree/{dn...}/children?page=N` | F1 HTMX fragment |
+| `GET /api/entry/{dn...}/photo?idx=N` | jpegPhoto image data |
+| `GET /api/export?dn=...&scope=entry\|subtree` | F7 LDIF data |
+| `GET /api/import/report/{id}` | F4 error report (plain text) |
 | `GET /healthz` | health |
 
 State-changing responses carry `X-Mutated-Subtree: <dn>` so the tree refreshes

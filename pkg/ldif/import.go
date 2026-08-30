@@ -71,7 +71,7 @@ func (h *ImportHandler) Form(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Submit handles POST /api/import (F4, AE5).
+// Submit handles POST /import (F4, AE5).
 func (h *ImportHandler) Submit(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, h.maxBody)
 	mr, err := r.MultipartReader()

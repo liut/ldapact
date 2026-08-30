@@ -60,7 +60,7 @@ func schemaBrowser(t *testing.T) *SchemaBrowser {
 
 func TestObjectClassesList(t *testing.T) {
 	rr := httptest.NewRecorder()
-	schemaBrowser(t).ObjectClasses(rr, httptest.NewRequest(http.MethodGet, "/api/schema/objectclass", nil))
+	schemaBrowser(t).ObjectClasses(rr, httptest.NewRequest(http.MethodGet, "/schema/objectclass", nil))
 	body := rr.Body.String()
 	if rr.Code != http.StatusOK {
 		t.Fatalf("code = %d", rr.Code)
@@ -69,7 +69,7 @@ func TestObjectClassesList(t *testing.T) {
 	if strings.Index(body, "inetOrgPerson") > strings.Index(body, `>person<`) {
 		t.Errorf("list not sorted: %s", body)
 	}
-	for _, want := range []string{"/api/schema/objectclass/inetOrgPerson", "STRUCTURAL"} {
+	for _, want := range []string{"/schema/objectclass/inetOrgPerson", "STRUCTURAL"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %q", want)
 		}
@@ -78,16 +78,16 @@ func TestObjectClassesList(t *testing.T) {
 
 func TestObjectClassDetail(t *testing.T) {
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/schema/objectclass/inetOrgPerson", nil)
+	req := httptest.NewRequest(http.MethodGet, "/schema/objectclass/inetOrgPerson", nil)
 	req.SetPathValue("name", "inetOrgPerson")
 	schemaBrowser(t).ObjectClassDetail(rr, req)
 	body := rr.Body.String()
 	for _, want := range []string{
 		"2.16.840.1.113730.3.2.2",
-		`/api/schema/objectclass/person`,
-		`/api/schema/attribute/cn`,
-		`/api/schema/attribute/sn`,
-		`/api/schema/attribute/mail`,
+		`/schema/objectclass/person`,
+		`/schema/attribute/cn`,
+		`/schema/attribute/sn`,
+		`/schema/attribute/mail`,
 		"Inherits from",
 		"Parent to",
 		"Required Attributes",
@@ -113,15 +113,15 @@ func TestObjectClassDetail(t *testing.T) {
 
 func TestObjectClassDetailInheritedAttrs(t *testing.T) {
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/schema/objectclass/dSA", nil)
+	req := httptest.NewRequest(http.MethodGet, "/schema/objectclass/dSA", nil)
 	req.SetPathValue("name", "dSA")
 	schemaBrowser(t).ObjectClassDetail(rr, req)
 	body := rr.Body.String()
 	for _, want := range []string{
 		"2.5.6.13",
-		`/api/schema/objectclass/applicationEntity`,
-		`/api/schema/attribute/cn`,
-		`/api/schema/attribute/presentationAddress`,
+		`/schema/objectclass/applicationEntity`,
+		`/schema/attribute/cn`,
+		`/schema/attribute/presentationAddress`,
 		"(Inherited from",
 	} {
 		if !strings.Contains(body, want) {
@@ -138,11 +138,11 @@ func TestObjectClassDetailInheritedAttrs(t *testing.T) {
 
 func TestObjectClassDetailParentTo(t *testing.T) {
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/schema/objectclass/applicationEntity", nil)
+	req := httptest.NewRequest(http.MethodGet, "/schema/objectclass/applicationEntity", nil)
 	req.SetPathValue("name", "applicationEntity")
 	schemaBrowser(t).ObjectClassDetail(rr, req)
 	body := rr.Body.String()
-	for _, want := range []string{`/api/schema/objectclass/dSA`, ">dSA<"} {
+	for _, want := range []string{`/schema/objectclass/dSA`, ">dSA<"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("applicationEntity detail missing %q: %s", want, body)
 		}
@@ -151,11 +151,11 @@ func TestObjectClassDetailParentTo(t *testing.T) {
 
 func TestObjectClassDetailTop(t *testing.T) {
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/schema/objectclass/top", nil)
+	req := httptest.NewRequest(http.MethodGet, "/schema/objectclass/top", nil)
 	req.SetPathValue("name", "top")
 	schemaBrowser(t).ObjectClassDetail(rr, req)
 	body := rr.Body.String()
-	for _, want := range []string{`<a href="/api/schema/objectclass">all</a>`} {
+	for _, want := range []string{`<a href="/schema/objectclass">all</a>`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("top detail missing %q: %s", want, body)
 		}
@@ -164,7 +164,7 @@ func TestObjectClassDetailTop(t *testing.T) {
 
 func TestObjectClassDetail404(t *testing.T) {
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/schema/objectclass/nope", nil)
+	req := httptest.NewRequest(http.MethodGet, "/schema/objectclass/nope", nil)
 	req.SetPathValue("name", "nope")
 	schemaBrowser(t).ObjectClassDetail(rr, req)
 	if rr.Code != http.StatusNotFound {
@@ -174,9 +174,9 @@ func TestObjectClassDetail404(t *testing.T) {
 
 func TestAttributesList(t *testing.T) {
 	rr := httptest.NewRecorder()
-	schemaBrowser(t).Attributes(rr, httptest.NewRequest(http.MethodGet, "/api/schema/attribute", nil))
+	schemaBrowser(t).Attributes(rr, httptest.NewRequest(http.MethodGet, "/schema/attribute", nil))
 	body := rr.Body.String()
-	for _, want := range []string{"/api/schema/attribute/cn", "single-value", "multi-value"} {
+	for _, want := range []string{"/schema/attribute/cn", "single-value", "multi-value"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %q: %s", want, body)
 		}
@@ -185,7 +185,7 @@ func TestAttributesList(t *testing.T) {
 
 func TestAttributeDetail(t *testing.T) {
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/schema/attribute/uidNumber", nil)
+	req := httptest.NewRequest(http.MethodGet, "/schema/attribute/uidNumber", nil)
 	req.SetPathValue("name", "uidNumber")
 	schemaBrowser(t).AttributeDetail(rr, req)
 	body := rr.Body.String()
@@ -204,18 +204,18 @@ func TestAttributeDetail(t *testing.T) {
 
 func TestAttributeDetailRich(t *testing.T) {
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/schema/attribute/cn", nil)
+	req := httptest.NewRequest(http.MethodGet, "/schema/attribute/cn", nil)
 	req.SetPathValue("name", "cn")
 	schemaBrowser(t).AttributeDetail(rr, req)
 	body := rr.Body.String()
 	for _, want := range []string{
-		`/api/schema/attribute/name`,                       // SUP resolved to canonical name
-		`/api/schema/attribute/commonName`,                 // alias link
+		`/schema/attribute/name`,                           // SUP resolved to canonical name
+		`/schema/attribute/commonName`,                     // alias link
 		"Directory String (1.3.6.1.4.1.1466.115.121.1.15)", // syntax desc + OID
 		"64 characters",                                    // max length from {64}
 		"Used by objectClasses",
-		`/api/schema/objectclass/person`,
-		`/api/schema/objectclass/applicationEntity`,
+		`/schema/objectclass/person`,
+		`/schema/objectclass/applicationEntity`,
 		"(not specified)", // ordering/substring/usage
 	} {
 		if !strings.Contains(body, want) {
@@ -224,14 +224,14 @@ func TestAttributeDetailRich(t *testing.T) {
 	}
 	// cn is used directly by applicationEntity, person, inetOrgPerson — but
 	// not by dSA (which only inherits it via applicationEntity).
-	if strings.Contains(body, "/api/schema/objectclass/dSA") {
+	if strings.Contains(body, "/schema/objectclass/dSA") {
 		t.Errorf("cn should not be used by dSA (inherited only): %s", body)
 	}
 }
 
 func TestAttributeDetail404(t *testing.T) {
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/schema/attribute/nope", nil)
+	req := httptest.NewRequest(http.MethodGet, "/schema/attribute/nope", nil)
 	req.SetPathValue("name", "nope")
 	schemaBrowser(t).AttributeDetail(rr, req)
 	if rr.Code != http.StatusNotFound {
@@ -243,7 +243,7 @@ func TestSchemaNilReturns503(t *testing.T) {
 	renderer := web.New(web.MustParse(nil))
 	b := NewSchemaBrowser(&fakeLister{}, renderer)
 	rr := httptest.NewRecorder()
-	b.ObjectClasses(rr, httptest.NewRequest(http.MethodGet, "/api/schema/objectclass", nil))
+	b.ObjectClasses(rr, httptest.NewRequest(http.MethodGet, "/schema/objectclass", nil))
 	if rr.Code != http.StatusServiceUnavailable {
 		t.Fatalf("code = %d", rr.Code)
 	}
