@@ -13,14 +13,17 @@ import (
 
 // CSRF rejects state-changing requests whose Origin header does not match the
 // request Host. Requests without an Origin header (curl, same-origin legacy
-// clients) pass through; SameSite=Strict cookies cover the browser cases where
-// Origin is always present on cross-site state changes.
+// clients) pass through, as does the opaque "null" serialization Chromium
+// sends on form submissions from pages with a strict Referrer-Policy (this
+// app sets no-referrer). SameSite=Strict cookies and X-Frame-Options: DENY
+// cover the browser cases where Origin is always present on cross-site state
+// changes.
 func CSRF(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if isStateChanging(r.Method) {
 				origin := r.Header.Get("Origin")
-				if origin != "" && !sameOrigin(origin, r.Host) {
+				if origin != "" && origin != "null" && !sameOrigin(origin, r.Host) {
 					if logger != nil {
 						logger.Warn("cross-origin state change rejected",
 							"event", "csrf.rejected",

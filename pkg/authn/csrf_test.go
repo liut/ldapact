@@ -49,6 +49,31 @@ func TestCSRFAllowsMissingOrigin(t *testing.T) {
 	}
 }
 
+func TestCSRFAllowsNullOrigin(t *testing.T) {
+	// Chromium sends "Origin: null" on form submissions from pages served
+	// with a strict Referrer-Policy (no-referrer); the app must not treat
+	// that opaque serialization as a cross-origin attack.
+	req := httptest.NewRequest(http.MethodPost, "/api/entry", nil)
+	req.Header.Set("Origin", "null")
+	req.Host = "localhost:8080"
+	rr := httptest.NewRecorder()
+	CSRF(nil)(http.HandlerFunc(okHandler)).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("Origin: null must pass like a missing Origin: code = %d, want 200", rr.Code)
+	}
+}
+
+func TestCSRFStillRejectsMismatchedOrigin(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/entry", nil)
+	req.Header.Set("Origin", "http://attacker.example")
+	req.Host = "localhost:8080"
+	rr := httptest.NewRecorder()
+	CSRF(nil)(http.HandlerFunc(okHandler)).ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("mismatched Origin must still be rejected: code = %d, want 403", rr.Code)
+	}
+}
+
 func TestCSRFIgnoresSafeMethods(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/entry", nil)
 	req.Header.Set("Origin", "http://attacker.com")
