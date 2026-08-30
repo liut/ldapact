@@ -19,6 +19,7 @@ test-integration:
 test-js:
 	node test/js/autofill_test.js
 	node test/js/tree_keys_test.js
+	node test/js/edit_multi_test.js
 
 lint: fmt vet staticcheck govulncheck
 

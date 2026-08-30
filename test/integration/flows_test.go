@@ -254,6 +254,9 @@ func TestFlowEditSearch(t *testing.T) {
 		"facsimileTelephoneNumber": {""},
 		"mobile":                   {""},
 		"mail":                     {"u0005@example.com"},
+		"uidNumber":                {"2005"},
+		"gidNumber":                {"100"},
+		"homeDirectory":            {"/home/u0005"},
 		"stage":                    {"review"},
 	}
 	resp = do(t, http.MethodPost, "/api/entry/"+dn+"/edit", form)

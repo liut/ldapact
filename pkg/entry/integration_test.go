@@ -331,6 +331,7 @@ func TestIntegrationEditEntry(t *testing.T) {
 			"sn":            {"Jones"},
 			"objectClass":   {"top", "person", "organizationalPerson"},
 			"add_attr":      {"postalCode"},
+			"add_attr_go":   {"1"},
 			"stage":         {"review"},
 		}.Encode()))
 	bReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")

@@ -164,7 +164,11 @@ func (h *Handler) EditSubmit(w http.ResponseWriter, r *http.Request) {
 	// Stateless round trip: attributes added via add_attr travel through the
 	// review/apply hidden inputs; re-derive them from the submitted form.
 	fields = h.mergeSubmittedFields(e, fields, submittedValues(r))
-	if add := strings.TrimSpace(r.FormValue("add_attr")); add != "" {
+	// Each management control is gated on its own submit button: both pickers
+	// submit their current selection on every POST (and "Review changes"
+	// submits neither), so a stray select value must never trigger the wrong
+	// action.
+	if add := strings.TrimSpace(r.FormValue("add_attr")); add != "" && r.FormValue("add_attr_go") != "" {
 		if h.validAddCandidate(e, fields, add) {
 			fields = append(fields, h.addedEditField(e, add, submittedValues(r)))
 			h.renderEditForm(w, r, e, fields, tmpl, nil)
@@ -175,7 +179,7 @@ func (h *Handler) EditSubmit(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if oc := strings.TrimSpace(r.FormValue("add_oc")); oc != "" {
+	if oc := strings.TrimSpace(r.FormValue("add_oc")); oc != "" && r.FormValue("add_oc_go") != "" {
 		if errMsg := h.objectClassChange(e, fields, "add", oc); errMsg != "" {
 			h.renderEditForm(w, r, e, fields, tmpl, map[string]string{"_form": errMsg})
 			return
@@ -315,6 +319,7 @@ func (h *Handler) buildEditModel(r *http.Request, e *ldap.Entry, submitted map[s
 	var fields []editFieldModel
 	if tmpl != nil {
 		fields = h.templateEditFields(r, e, tmpl, submitted, required)
+		fields = h.mergeEntryFields(e, fields, submitted, required)
 	} else {
 		fields = h.genericEditFields(e, submitted, required)
 	}
@@ -398,6 +403,28 @@ func (h *Handler) templateEditFields(r *http.Request, e *ldap.Entry, tmpl *tplen
 			f.values = []string{""}
 		}
 		fields = append(fields, f)
+	}
+	return fields
+}
+
+// mergeEntryFields appends schema-driven controls for entry attributes the
+// selected modification template does not cover, so values already on the
+// entry stay visible and editable in template-driven editing. Template
+// presentation is preserved for the template's own attributes (deduped by
+// lowercase name).
+func (h *Handler) mergeEntryFields(e *ldap.Entry, fields []editFieldModel, submitted map[string][]string, required map[string]bool) []editFieldModel {
+	generic := h.genericEditFields(e, submitted, required)
+	present := map[string]bool{}
+	for _, f := range fields {
+		present[strings.ToLower(f.id)] = true
+	}
+	for _, f := range generic {
+		lower := strings.ToLower(f.id)
+		if present[lower] {
+			continue
+		}
+		fields = append(fields, f)
+		present[lower] = true
 	}
 	return fields
 }
@@ -666,6 +693,11 @@ func (h *Handler) attributeCandidates(e *ldap.Entry, fields []editFieldModel) []
 	active := map[string]bool{}
 	for _, f := range fields {
 		active[strings.ToLower(f.id)] = true
+	}
+	// R8: attributes already present on the entry are not candidates, even
+	// when the active template does not render them.
+	for _, a := range e.Attributes {
+		active[strings.ToLower(a.Name)] = true
 	}
 	seen := map[string]bool{}
 	var out []tplengine.Value

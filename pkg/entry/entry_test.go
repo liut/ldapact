@@ -1185,7 +1185,11 @@ func TestEditAddAttribute(t *testing.T) {
 		"postalAddress": {"123 Main St\nSpringfield"},
 		"sn":            {"Davis"},
 		"add_attr":      {"telephoneNumber"},
-		"stage":         {"review"},
+		"add_attr_go":   {"1"},
+		// The objectClass picker submits its selection on every POST; a stray
+		// value must not hijack the attribute add.
+		"add_oc": {"posixAccount"},
+		"stage":  {"review"},
 	}
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
@@ -1197,6 +1201,9 @@ func TestEditAddAttribute(t *testing.T) {
 	}
 	if strings.Contains(rr.Body.String(), "Apply changes") {
 		t.Error("adding an attribute must not proceed to review")
+	}
+	if strings.Contains(rr.Body.String(), `oc-name">posixAccount`) {
+		t.Error("stray add_oc value must not add the object class")
 	}
 }
 
@@ -1262,6 +1269,7 @@ func TestEditAddAttributeInvalid(t *testing.T) {
 		"postalAddress": {"123 Main St\nSpringfield"},
 		"sn":            {"Davis"},
 		"add_attr":      {"operationalAttr"},
+		"add_attr_go":   {"1"},
 		"stage":         {"review"},
 	}
 	rr := httptest.NewRecorder()
@@ -1274,6 +1282,108 @@ func TestEditAddAttributeInvalid(t *testing.T) {
 	}
 	if modified {
 		t.Error("invalid add must not call Modify")
+	}
+}
+
+// TestEditAddObjectClassIgnoresStrayAddAttr: the attribute picker submits
+// its selection alongside the object-class Add click; only the clicked
+// button's action may run.
+func TestEditAddObjectClassIgnoresStrayAddAttr(t *testing.T) {
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		schema: controlSchema(),
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{schemaControlsEntry()}}, nil
+		},
+	}
+	h := testHandler(t, fake)
+	form := url.Values{
+		"booleanAttr":   {"TRUE"},
+		"dnAttr":        {"cn=manager,ou=People,dc=example,dc=com"},
+		"postalAddress": {"123 Main St\nSpringfield"},
+		"sn":            {"Davis"},
+		"add_attr":      {"telephoneNumber"},
+		"add_oc":        {"posixAccount"},
+		"add_oc_go":     {"1"},
+		"stage":         {"review"},
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
+	h.EditSubmit(rr, req)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `oc-name">posixAccount`) {
+		t.Fatalf("add_oc must re-render with posixAccount listed: %d %s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), `name="telephoneNumber"`) {
+		t.Error("stray add_attr value must not add the attribute")
+	}
+}
+
+// TestEditReviewIgnoresStrayPickerValues: both pickers submit their current
+// selection on every POST, but "Review changes" (no *_go button) must reach
+// the review page rather than adding an attribute or object class.
+func TestEditReviewIgnoresStrayPickerValues(t *testing.T) {
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		schema: controlSchema(),
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{schemaControlsEntry()}}, nil
+		},
+	}
+	h := testHandler(t, fake)
+	form := url.Values{
+		"booleanAttr":   {"TRUE"},
+		"dnAttr":        {"cn=manager,ou=People,dc=example,dc=com"},
+		"postalAddress": {"123 Main St\nSpringfield"},
+		"sn":            {"Davis"},
+		"add_attr":      {"telephoneNumber"},
+		"add_oc":        {"posixAccount"},
+		"stage":         {"review"},
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/entry/cn=carol,ou=People,dc=example,dc=com/edit", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("dn", "cn=carol,ou=People,dc=example,dc=com")
+	h.EditSubmit(rr, req)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `id="confirm-title"`) {
+		t.Fatalf("Review changes with stray picker values must render the review page: %d %s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), `name="add_attr"`) {
+		t.Error("review must not re-render the edit form")
+	}
+}
+
+// TestEditTemplateMergesNonTemplateEntryAttributes: template-driven editing
+// must still render controls for entry attributes the template does not
+// cover, so existing values stay visible and editable, and already-present
+// attributes must not be offered by the add-attribute picker.
+func TestEditTemplateMergesNonTemplateEntryAttributes(t *testing.T) {
+	entry := inetOrgPersonEntry()
+	entry.Attributes = append(entry.Attributes, &ldap.EntryAttribute{Name: "description", Values: []string{"VIP user"}})
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{entry}}, nil
+		},
+	}
+	h := testHandler(t, fake)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/entry/cn=alice,ou=People,dc=example,dc=com/edit", nil)
+	req.SetPathValue("dn", "cn=alice,ou=People,dc=example,dc=com")
+	h.EditForm(rr, req)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "Generic: Address Book Entry") {
+		t.Fatalf("template edit form = %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, `name="description"`) || !strings.Contains(body, `value="VIP user"`) {
+		t.Error("template edit form must render non-template entry attributes with their values")
+	}
+	if strings.Contains(body, `<option value="description">`) {
+		t.Error("already-present entry attributes must not be add-attribute candidates")
+	}
+	if strings.Count(body, `id="f-sn"`) != 1 {
+		t.Error("template attributes must not be duplicated by the merge")
 	}
 }
 
@@ -1374,6 +1484,7 @@ func TestEditObjectClassAdd(t *testing.T) {
 		"sn":            {"Davis"},
 		"objectClass":   {"top", "person"},
 		"add_oc":        {"posixAccount"},
+		"add_oc_go":     {"1"},
 		"stage":         {"review"},
 	}
 	rr := httptest.NewRecorder()
@@ -1402,6 +1513,7 @@ func TestEditObjectClassAddStructuralRejected(t *testing.T) {
 		"sn":            {"Davis"},
 		"objectClass":   {"top", "person"},
 		"add_oc":        {"inetOrgPerson"},
+		"add_oc_go":     {"1"},
 		"stage":         {"review"},
 	}
 	rr := httptest.NewRecorder()
@@ -1820,6 +1932,9 @@ func editFormValues() url.Values {
 		"facsimileTelephoneNumber": {""},
 		"mobile":                   {""},
 		"mail":                     {"alice@example.com"},
+		// Entry attribute outside the inetOrgPerson template: template-driven
+		// forms now render and round-trip it like any other field.
+		"uid": {"alice"},
 	}
 }
 
@@ -2310,6 +2425,12 @@ func TestEditForcedTemplateRoundTrip(t *testing.T) {
 		"cn":        {"staff"},
 		"gidNumber": {"100"},
 		"memberUid": {"alice", "bob", "carol"},
+		// Entry attributes the forced template does not cover render as
+		// generic controls and round-trip like every other field.
+		"sn":        {"Smith"},
+		"givenName": {"Alice"},
+		"mail":      {"alice@example.com"},
+		"uid":       {"alice"},
 		"stage":     {"review"},
 	}
 	rr := httptest.NewRecorder()

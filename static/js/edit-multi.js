@@ -20,7 +20,11 @@
     input.focus();
   }
   document.addEventListener('click', function (event) {
-    var add = event.target.closest('.add-row');
+    // Only the multi-value "+ Add" row buttons carry the class on the button
+    // itself. The edit form's "Add attribute" / "Add object class" submit
+    // buttons sit inside a <div class="add-row"> wrapper; those must submit
+    // the form, not be swallowed here.
+    var add = event.target.closest('button.add-row');
     if (add) {
       event.preventDefault();
       addRow(add);
