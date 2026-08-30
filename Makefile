@@ -1,14 +1,36 @@
 GO ?= go
 BIN := bin/ldapact
 VERSION ?= dev
+COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+SOURCES := $(shell find cmd pkg -type f -name '*.go' ! -name '*_test.go')
 # This repo sits under a parent go.work that does not list it; build standalone.
 GOWORK ?= off
 export GOWORK
 
-.PHONY: build test test-integration test-js lint fmt vet staticcheck govulncheck run clean
+LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT)
+
+.PHONY: build dist test test-integration test-js lint fmt vet staticcheck govulncheck run clean
 
 build:
-	CGO_ENABLED=0 $(GO) build -trimpath -o $(BIN) -ldflags "-X main.version=$(VERSION)" ./cmd/ldapact
+	CGO_ENABLED=0 $(GO) build -trimpath -o $(BIN) -ldflags "$(LDFLAGS)" ./cmd/ldapact
+
+dist/linux_amd64/ldapact: $(SOURCES)
+	mkdir -p $(dir $@)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath -o $@ -ldflags "$(LDFLAGS)" ./cmd/ldapact
+
+dist/darwin_amd64/ldapact: $(SOURCES)
+	mkdir -p $(dir $@)
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 $(GO) build -trimpath -o $@ -ldflags "$(LDFLAGS)" ./cmd/ldapact
+
+dist/darwin_arm64/ldapact: $(SOURCES)
+	mkdir -p $(dir $@)
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 $(GO) build -trimpath -o $@ -ldflags "$(LDFLAGS)" ./cmd/ldapact
+
+dist/windows_amd64/ldapact: $(SOURCES)
+	mkdir -p $(dir $@)
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build -trimpath -o $@.exe -ldflags "$(LDFLAGS)" ./cmd/ldapact
+
+dist: dist/linux_amd64/ldapact dist/darwin_amd64/ldapact dist/darwin_arm64/ldapact dist/windows_amd64/ldapact
 
 test:
 	$(GO) test ./...
@@ -40,3 +62,4 @@ run:
 
 clean:
 	rm -f $(BIN)
+	rm -rf dist

@@ -1,0 +1,69 @@
+name: release
+
+on:
+  push:
+    tags:
+      - v*
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install staticcheck
+        run: go install honnef.co/go/tools/cmd/staticcheck@latest
+
+      - name: Vet & lint
+        run: |
+          make fmt
+          go vet ./...
+          staticcheck ./...
+
+  build:
+    name: build-and-release
+    needs: [lint]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Build all platforms
+        env:
+          CGO_ENABLED: 0
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          make dist/linux_amd64/ldapact
+          make dist/darwin_amd64/ldapact
+          make dist/darwin_arm64/ldapact
+          make dist/windows_amd64/ldapact
+
+      - name: Package
+        run: |
+          tar -cvJf ldapact-linux-amd64-${{ steps.version.outputs.VERSION }}.tar.xz -C dist/linux_amd64 ldapact
+          tar -cvJf ldapact-darwin-amd64-${{ steps.version.outputs.VERSION }}.tar.xz -C dist/darwin_amd64 ldapact
+          tar -cvJf ldapact-darwin-arm64-${{ steps.version.outputs.VERSION }}.tar.xz -C dist/darwin_arm64 ldapact
+          tar -cvJf ldapact-windows-amd64-${{ steps.version.outputs.VERSION }}.tar.xz -C dist/windows_amd64 ldapact.exe
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ldapact-*.tar.xz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

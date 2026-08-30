@@ -38,11 +38,16 @@ custom creation templates keep working, and renders the UI with Go
 
 ```sh
 make build            # CGO_ENABLED=0 single binary -> bin/ldapact
+make dist             # cross-platform release binaries under dist/
 make test             # unit + integration tests (integration skips when no backend detected)
 make test-integration # end-to-end F1-F8 vs the detected backend
 make test-js          # node test/js/*_test.js
 make lint             # gofmt + go vet + staticcheck + govulncheck
 make run              # go run ./cmd/ldapact (needs LDAPADM_* env; see README "Configuration")
+
+CI mirrors these targets in `.github/workflows`: lint, test (Docker-backed
+integration on ubuntu runners), and release (tag `v*` -> multi-platform
+binaries + GitHub Release).
 ```
 
 The Makefile exports `GOWORK=off` because this repo is not listed in the

@@ -1,0 +1,36 @@
+name: test
+
+on:
+  push:
+    branches:
+      - main
+      - feat*
+    tags:
+      - v*
+  pull_request:
+
+jobs:
+  test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build
+        run: make build
+
+      - name: Unit + integration tests
+        run: make test
+
+      - name: JS tests
+        run: make test-js
