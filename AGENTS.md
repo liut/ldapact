@@ -45,9 +45,9 @@ make test-js          # node test/js/*_test.js
 make lint             # gofmt + go vet + staticcheck + govulncheck
 make run              # go run ./cmd/ldapact (needs LDAPADM_* env; see README "Configuration")
 
-CI mirrors these targets in `.github/workflows`: lint, test (Docker-backed
-integration on ubuntu runners), and release (tag `v*` -> multi-platform
-binaries + GitHub Release).
+CI mirrors these targets in `.github/workflows`: `ci` (parallel lint and test
+jobs; Docker-backed integration on ubuntu runners) and `release` (tag `v*` ->
+multi-platform binaries + GitHub Release).
 ```
 
 The Makefile exports `GOWORK=off` because this repo is not listed in the
