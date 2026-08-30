@@ -4,7 +4,7 @@
   <form method="get" action="/api/search" class="search-form">
     <div class="form-field">
       <label for="q">Filter</label>
-      <input type="text" id="q" name="q" value="{{.Query}}" placeholder="(uid=alice)" required
+      <input type="text" id="q" name="q" value="{{.Query}}" placeholder="uid=alice or (uid=alice)" required
              {{if .Error}}aria-invalid="true" aria-describedby="search-error"{{end}}>
     </div>
     <div class="form-field">

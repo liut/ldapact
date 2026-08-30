@@ -132,6 +132,13 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 		h.renderPage(w, data)
 		return
 	}
+	// phpLDAPadmin parity: accept a bare attribute filter ("uid=alice",
+	// "objectClass=*") and wrap it into a complete LDAP filter; complete
+	// filters like "(uid=alice)" pass through unchanged.
+	if !strings.HasPrefix(q, "(") {
+		q = "(" + q + ")"
+		data.Query = q
+	}
 	if _, err := ldap.CompileFilter(q); err != nil {
 		data.Error = filterError(q, err)
 		h.renderPage(w, data)

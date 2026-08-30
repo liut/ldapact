@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -69,6 +70,32 @@ func TestSearchInvalidFilter(t *testing.T) {
 	body := rr.Body.String()
 	if !strings.Contains(body, "filter syntax error at position") || !strings.Contains(body, `aria-invalid="true"`) {
 		t.Errorf("invalid filter feedback: %s", body)
+	}
+}
+
+func TestSearchWrapsBareFilter(t *testing.T) {
+	// phpLDAPadmin parity: "uid=alice" / "objectClass=*" are accepted and
+	// wrapped into complete LDAP filters before the search is issued.
+	for _, tc := range []struct {
+		query string
+		want  string
+	}{
+		{"uid=alice", "(uid=alice)"},
+		{"objectClass=*", "(objectClass=*)"},
+		{"(&(sn=Smith)(givenName=David))", "(&(sn=Smith)(givenName=David))"},
+		{"(uid=alice)", "(uid=alice)"},
+	} {
+		fake := &fakeSearcher{res: &ldapx.PageResult{}}
+		h := searchHandler(t, fake)
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/search?q="+url.QueryEscape(tc.query)+"&scope=subtree", nil)
+		h.Search(rr, req)
+		if fake.gotOpts.Filter != tc.want {
+			t.Errorf("query %q: filter sent = %q, want %q", tc.query, fake.gotOpts.Filter, tc.want)
+		}
+		if rr.Code != http.StatusOK {
+			t.Errorf("query %q: code = %d, body %.200s", tc.query, rr.Code, rr.Body.String())
+		}
 	}
 }
 
