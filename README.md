@@ -18,17 +18,13 @@ static, embeddable binary (R17).
   affordance is only available on entries that have a `userPassword`
   attribute.
 - **Edit attributes** — modification-template-driven entry editing with a
-  generic editor fallback, review-then-apply, and multi-value support;
-  controls render per the LDAP schema definition (attributeType syntax picks
-  the control kind — boolean selects, DN fields, read-only binary, textareas —
-  single/multi-value shape, schema-MUST markers, and operational-attribute
-  exclusion), with template presentation preserved where it does not
-  conflict. Attributes absent from the entry can be added from the objectClass
-  schema (MUST/MAY), and MAY/schema-unknown attributes can be cleared or
-  deleted (MUST attributes cannot); binary attributes are replaced via file
-  upload through the same review → apply flow. Object classes can be added
-  (AUXILIARY only) and value-less auxiliary classes removed. `userPassword`
-  stays in the password flow (F3) and RDN changes stay in Rename (F6).
+  generic-editor fallback, review-then-apply, multi-value support, and
+  schema-driven controls (attributeType syntax picks the control kind;
+  MUST/MAY markers; operational attributes excluded). Attributes can be added
+  from the objectClass schema, MAY/unknown ones cleared or deleted (MUST
+  cannot), binary attributes replaced via file upload, and auxiliary object
+  classes added/removed. `userPassword` and RDN changes stay in Password (F3)
+  / Rename (F6).
 - **F4/F7 LDIF** — streaming import (per-entry continue + downloadable error
   report) and export (subtree streaming, `userPassword` redacted by default).
 - **F5/F6 Delete/Rename** — leaf-only deletion (entries with children are
@@ -143,42 +139,11 @@ make lint             # gofmt + go vet + staticcheck + govulncheck
 make run              # local dev (export the required env vars; see Configuration)
 ```
 
-`.env.example` holds a starter set of variables. Copy it to your own file
-before using it — never edit or source the example directly:
+`.env.example` holds a starter set of variables — copy it to your own file and
+override the secrets; never edit or source the example directly.
 
-```sh
-cp .env.example .env
-set -a; source .env; set +a
-```
-
-Then override the secrets in `.env`.
-
-### Integration-test LDAP backends
-
-Integration tests use `internal/testldap`, which detects a backend in this
-order and never touches a real LDAP service:
-
-1. `LDAPADM_TEST_LDAP_URL` — use a caller-provisioned dedicated test server
-   (optionally `LDAPADM_TEST_LDAP_BIND_DN/_BIND_PASSWORD/_BASE_DN`).
-2. Docker — an ephemeral `bitnami/openldap:2.6` container (testcontainers-go).
-3. A local `slapd` binary — an **ephemeral foreground instance** with a
-   generated config and temp data directory on a random `127.0.0.1` port
-   (MacPorts `/opt/local/libexec/slapd`, Homebrew, or system OpenLDAP).
-   System configs, data directories, pidfiles, and launchd/systemd services
-   are never read or modified.
-
-The `LDAPADM_TEST_*` variables are test-harness only: the production binary
-rejects them (strict allowlist), so unset them before starting the server.
-When no backend exists, integration tests skip. The harness probes whether the
-server verifies `{SSHA512}` binds and downgrades the write scheme to `{SSHA}`
-for directory builds that lack SHA-2 password support (e.g. the MacPorts
-OpenLDAP build); the product default remains SSHA512 (KTD 6).
-
-The local-backend runs also caught and fixed two latent defects: `{dn...}`
-wildcards can't be followed by literal segments in Go's ServeMux (route
-dispatch now parses `/children`, `/password`, `/delete`, `/rename` suffixes),
-and LDAP paged-result sessions are connection-scoped, so `Page` now pins one
-pooled connection for the whole multi-page loop.
+Repository layout, the integration-test backend contract, conventions, and
+known gotchas: see [AGENTS.md](AGENTS.md).
 
 ## Routes
 
@@ -213,14 +178,3 @@ endpoints that return data (images, LDIF, report files) or HTMX fragments:
 
 State-changing responses carry `X-Mutated-Subtree: <dn>` so the tree refreshes
 the affected branch.
-
-## Known scope notes (v1)
-
-- The F2 wizard renders all pages in one form with a step indicator;
-  per-page server-side session state is deferred (see
-  `docs/plans/2026-08-24-001-...md` "Deferred to Implementation").
-- Session-ID rotation happens before state-changing handlers (header commit
-  order makes post-handler cookie rotation unreliable).
-- Docker-gated integration tests cover the AE3/AE4/partial-AE5 gates; the
-  exact 5000-child paging scale (AE2) is exercised at 1210 children in the
-  harness.

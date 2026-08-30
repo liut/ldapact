@@ -3,6 +3,15 @@
 All notable changes to ldapact v1 are tracked here, one entry per implementation
 unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
 
+## Docs split: README vs AGENTS.md (2026-08-31)
+
+- README is now user-facing only: intro, features, quick start, configuration,
+  deployment, security model, routes, and the make-target summary.
+- Developer/agent guidance moved to the new `AGENTS.md`: repository layout,
+  the integration-test backend contract, commit/routing/rendering conventions,
+  config and secret handling, security invariants, known gotchas, and the
+  docs index. README links to it from the Development section.
+
 ## Route prefix cleanup (2026-08-31)
 
 - `/api` is now reserved for endpoints that return data or HTMX fragments:
