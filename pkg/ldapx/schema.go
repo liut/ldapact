@@ -24,17 +24,22 @@ type ObjectClass struct {
 
 // AttributeType is a parsed RFC 4512 attributeType definition (R5).
 type AttributeType struct {
-	OID         string
-	Name        string
-	Names       []string
-	Desc        string
-	Sup         []string
-	Equality    string
-	Ordering    string
-	Substr      string
-	Syntax      string
-	SingleValue bool
-	Usage       string
+	OID                string
+	Name               string
+	Names              []string
+	Desc               string
+	Sup                []string
+	Equality           string
+	Ordering           string
+	Substr             string
+	Syntax             string // raw SYNTAX value, including any {length} suffix
+	SyntaxOID          string // Syntax without the {length} suffix
+	MaxLength          int    // parsed from the {length} suffix; 0 when absent
+	SingleValue        bool
+	Collective         bool
+	Obsolete           bool
+	NoUserModification bool
+	Usage              string
 }
 
 // Schema is the process-lifetime cache of the LDAP subschema (R14). It is

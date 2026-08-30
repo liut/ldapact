@@ -5,21 +5,69 @@
   <a class="secondary" href="/api/schema/attribute">Attribute types</a>
 </nav>
 <section aria-labelledby="schema-detail-title">
+  {{if .IsObjectClass}}
   <h1 id="schema-detail-title">{{.Name}}</h1>
-  <dl>
-    <dt>OID</dt><dd>{{.OID}}</dd>
-    {{if .Kind}}<dt>Kind</dt><dd>{{.Kind}}</dd>{{end}}
-    {{if .Desc}}<dt>Description</dt><dd>{{.Desc}}</dd>{{end}}
-    {{if .Sup}}<dt>Sup</dt><dd>{{range .Sup}}<a href="{{.URL}}">{{.Name}}</a> {{end}}</dd>{{end}}
-    {{if .Syntax}}<dt>Syntax</dt><dd>{{.Syntax}}</dd>{{end}}
-    {{if .Equality}}<dt>Equality</dt><dd>{{.Equality}}</dd>{{end}}
-    {{if .Ordering}}<dt>Ordering</dt><dd>{{.Ordering}}</dd>{{end}}
-    {{if .Substr}}<dt>Substring</dt><dd>{{.Substr}}</dd>{{end}}
-    {{if .Must}}<dt>MUST</dt><dd>{{range .Must}}<a href="{{.URL}}">{{.Name}}</a> {{end}}</dd>{{end}}
-    {{if .May}}<dt>MAY</dt><dd>{{range .May}}<a href="{{.URL}}">{{.Name}}</a> {{end}}</dd>{{end}}
-    {{if .SingleValue}}<dt>Single value</dt><dd>yes</dd>{{end}}
-    {{if .Usage}}<dt>Usage</dt><dd>{{.Usage}}</dd>{{end}}
-  </dl>
-  <p><a href="/api/schema/{{.BackList}}">Back to {{.BackList}} list</a></p>
+  <table class="schema-detail">
+    <tbody>
+      <tr><th scope="row">OID</th><td><strong>{{.OID}}</strong></td></tr>
+      {{if .Desc}}<tr><th scope="row">Description</th><td>{{.Desc}}</td></tr>{{end}}
+      {{if .Kind}}<tr><th scope="row">Type</th><td>{{.Kind}}</td></tr>{{end}}
+      <tr><th scope="row">Inherits from</th><td>
+        {{- if .Sup}}{{range $i, $v := .Sup}}{{if $i}}, {{end}}<a href="{{$v.URL}}">{{$v.Name}}</a>{{end}}{{else}}(none){{end}}
+      </td></tr>
+      <tr><th scope="row">Parent to</th><td>
+        {{- if .Children}}{{range $i, $v := .Children}}{{if $i}}, {{end}}<a href="{{$v.URL}}">{{$v.Name}}</a>{{end}}{{else}}(none){{end}}
+      </td></tr>
+    </tbody>
+  </table>
+  <table class="schema-attrs">
+    <thead>
+      <tr><th scope="col">Required Attributes</th><th scope="col">Optional Attributes</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>
+          {{- if .Must}}<ul class="schema-list">
+            {{- range .Must}}<li><a href="{{.URL}}">{{.Name}}</a>{{if .Inherited}}<br><small>(Inherited from <a href="{{.SourceURL}}">{{.Source}}</a>)</small>{{end}}</li>{{- end}}
+          </ul>{{- else}}(none){{- end}}
+        </td>
+        <td>
+          {{- if .May}}<ul class="schema-list">
+            {{- range .May}}<li><a href="{{.URL}}">{{.Name}}</a>{{if .Inherited}}<br><small>(Inherited from <a href="{{.SourceURL}}">{{.Source}}</a>)</small>{{end}}</li>{{- end}}
+          </ul>{{- else}}(none){{- end}}
+        </td>
+      </tr>
+    </tbody>
+  </table>
+  {{else}}
+  <h1 id="schema-detail-title">{{.Name}}</h1>
+  <table class="schema-detail">
+    <tbody>
+      <tr><th scope="row">Description</th><td>{{if .Desc}}{{.Desc}}{{else}}(no description){{end}}</td></tr>
+      <tr><th scope="row">OID</th><td>{{.OID}}</td></tr>
+      <tr><th scope="row">Obsolete</th><td>{{if .Obsolete}}<strong>Yes</strong>{{else}}No{{end}}</td></tr>
+      <tr><th scope="row">Inherits from</th><td>
+        {{- if .Sup}}{{range $i, $v := .Sup}}{{if $i}}, {{end}}<a href="{{$v.URL}}">{{$v.Name}}</a>{{end}}{{else}}(none){{end}}
+      </td></tr>
+      <tr><th scope="row">Equality</th><td>{{if .Equality}}{{.Equality}}{{else}}(not specified){{end}}</td></tr>
+      <tr><th scope="row">Ordering</th><td>{{if .Ordering}}{{.Ordering}}{{else}}(not specified){{end}}</td></tr>
+      <tr><th scope="row">Substring</th><td>{{if .Substr}}{{.Substr}}{{else}}(not specified){{end}}</td></tr>
+      <tr><th scope="row">Syntax</th><td>{{if .Syntax}}{{if .SyntaxDesc}}{{.SyntaxDesc}} ({{.Syntax}}){{else}}{{.Syntax}}{{end}}{{else}}(not specified){{end}}</td></tr>
+      <tr><th scope="row">Single Valued</th><td>{{if .SingleValue}}Yes{{else}}No{{end}}</td></tr>
+      <tr><th scope="row">Collective</th><td>{{if .Collective}}Yes{{else}}No{{end}}</td></tr>
+      <tr><th scope="row">User Modification</th><td>{{if .NoUserModification}}No{{else}}Yes{{end}}</td></tr>
+      <tr><th scope="row">Usage</th><td>{{if .Usage}}{{.Usage}}{{else}}(not specified){{end}}</td></tr>
+      <tr><th scope="row">Maximum Length</th><td>{{if .MaxLength}}{{.MaxLength}}{{else}}(not applicable){{end}}</td></tr>
+      <tr><th scope="row">Aliases</th><td>
+        {{- if .Aliases}}{{range $i, $v := .Aliases}}{{if $i}}, {{end}}<a href="{{$v.URL}}">{{$v.Name}}</a>{{end}}{{else}}(none){{end}}
+      </td></tr>
+      <tr><th scope="row">Used by objectClasses</th><td>
+        {{- if .UsedBy}}{{range $i, $v := .UsedBy}}{{if $i}}, {{end}}<a href="{{$v.URL}}">{{$v.Name}}</a>{{end}}{{else}}(none){{end}}
+      </td></tr>
+      <tr><th scope="row">Force as MAY by config</th><td>No</td></tr>
+    </tbody>
+  </table>
+  {{end}}
+  <p><a href="/api/schema/{{.BackList}}">Back to {{if eq .BackList "objectclass"}}Object Classes{{else}}Attribute Types{{end}} list</a></p>
 </section>
 {{end}}

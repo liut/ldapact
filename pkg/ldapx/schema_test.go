@@ -95,6 +95,94 @@ func TestParseSchema(t *testing.T) {
 	}
 }
 
+func TestEffectiveAttrsWithSource(t *testing.T) {
+	s, err := ParseSchema(sampleSchemaEntry())
+	if err != nil {
+		t.Fatalf("ParseSchema: %v", err)
+	}
+
+	must := s.EffectiveMustAttrs("inetOrgPerson")
+	if len(must) != 2 || must[0] != (ObjectClassAttr{Name: "sn", Source: "person"}) || must[1] != (ObjectClassAttr{Name: "cn", Source: "person"}) {
+		t.Errorf("EffectiveMustAttrs(inetOrgPerson) = %+v", must)
+	}
+
+	may := s.EffectiveMayAttrs("inetOrgPerson")
+	if len(may) != 9 {
+		t.Fatalf("EffectiveMayAttrs(inetOrgPerson) len = %d: %+v", len(may), may)
+	}
+	// Own MAY first (declaration order), then person's MAY.
+	if may[0] != (ObjectClassAttr{Name: "audio", Source: "inetOrgPerson"}) {
+		t.Errorf("may[0] = %+v", may[0])
+	}
+	if may[5] != (ObjectClassAttr{Name: "userPassword", Source: "person"}) {
+		t.Errorf("may[5] = %+v", may[5])
+	}
+	// An attribute declared by both child and ancestor keeps the child's
+	// occurrence (first wins).
+	own := s.EffectiveMayAttrs("person")
+	if len(own) != 4 || own[0] != (ObjectClassAttr{Name: "userPassword", Source: "person"}) {
+		t.Errorf("EffectiveMayAttrs(person) = %+v", own)
+	}
+}
+
+func TestChildObjectClasses(t *testing.T) {
+	s, err := ParseSchema(sampleSchemaEntry())
+	if err != nil {
+		t.Fatalf("ParseSchema: %v", err)
+	}
+
+	if got := s.ChildObjectClasses("person"); len(got) != 1 || got[0] != "inetOrgPerson" {
+		t.Errorf("ChildObjectClasses(person) = %v", got)
+	}
+	if got := s.ChildObjectClasses("top"); len(got) != 2 || got[0] != "person" || got[1] != "posixAccount" {
+		t.Errorf("ChildObjectClasses(top) = %v", got)
+	}
+	if got := s.ChildObjectClasses("nope"); len(got) != 0 {
+		t.Errorf("ChildObjectClasses(nope) = %v", got)
+	}
+}
+
+func TestObjectClassesUsing(t *testing.T) {
+	s, err := ParseSchema(sampleSchemaEntry())
+	if err != nil {
+		t.Fatalf("ParseSchema: %v", err)
+	}
+
+	if got := s.ObjectClassesUsing("cn"); len(got) != 2 || got[0] != "person" || got[1] != "posixAccount" {
+		t.Errorf("ObjectClassesUsing(cn) = %v", got)
+	}
+	if got := s.ObjectClassesUsing("mail"); len(got) != 1 || got[0] != "inetOrgPerson" {
+		t.Errorf("ObjectClassesUsing(mail) = %v", got)
+	}
+	if got := s.ObjectClassesUsing("nope"); len(got) != 0 {
+		t.Errorf("ObjectClassesUsing(nope) = %v", got)
+	}
+}
+
+func TestParseAttributeTypeKeywords(t *testing.T) {
+	at, err := ParseAttributeType("( 1.2.3 NAME 'test' DESC 'x' OBSOLETE SUP name COLLECTIVE NO-USER-MODIFICATION EQUALITY caseIgnoreMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15{32768} SINGLE-VALUE USAGE directoryOperation )")
+	if err != nil {
+		t.Fatalf("ParseAttributeType: %v", err)
+	}
+	if !at.Obsolete || !at.Collective || !at.NoUserModification || !at.SingleValue {
+		t.Errorf("flags = obsolete:%v collective:%v noUserMod:%v single:%v", at.Obsolete, at.Collective, at.NoUserModification, at.SingleValue)
+	}
+	if at.SyntaxOID != "1.3.6.1.4.1.1466.115.121.1.15" || at.MaxLength != 32768 {
+		t.Errorf("syntax = %q oid = %q max = %d", at.Syntax, at.SyntaxOID, at.MaxLength)
+	}
+	if at.Usage != "directoryOperation" {
+		t.Errorf("usage = %q", at.Usage)
+	}
+
+	plain, err := ParseAttributeType("( 1.2.4 NAME 'plain' SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 )")
+	if err != nil {
+		t.Fatalf("ParseAttributeType: %v", err)
+	}
+	if plain.SyntaxOID != plain.Syntax || plain.MaxLength != 0 || plain.Obsolete || plain.Collective || plain.NoUserModification {
+		t.Errorf("plain = %+v", plain)
+	}
+}
+
 // controlSchemaEntry is a subschema fixture exercising every syntax and usage
 // classification the edit-form control classifier knows about, plus a
 // three-level objectClass SUP chain.

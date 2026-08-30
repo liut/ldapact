@@ -4,7 +4,10 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
+	"strings"
 
+	"github.com/liut/ldapact/pkg/ldapx"
 	"github.com/liut/ldapact/pkg/web"
 )
 
@@ -24,26 +27,46 @@ type SchemaRow struct {
 
 // SchemaDetailData drives schema detail pages (R5.x cross-navigation).
 type SchemaDetailData struct {
-	Name        string
-	OID         string
-	Desc        string
-	Kind        string
-	Sup         []SchemaLink
-	Must        []SchemaLink
-	May         []SchemaLink
-	Syntax      string
-	Equality    string
-	Ordering    string
-	Substr      string
-	SingleValue bool
-	Usage       string
-	BackList    string // "objectclass" or "attribute"
+	Name               string
+	OID                string
+	Desc               string
+	Kind               string
+	Sup                []SchemaLink
+	Children           []SchemaLink
+	Must               []SchemaAttrLink
+	May                []SchemaAttrLink
+	Syntax             string // syntax OID without any {length} suffix
+	SyntaxDesc         string // syntax OID's description from ldapSyntaxes
+	Equality           string
+	Ordering           string
+	Substr             string
+	SingleValue        bool
+	Collective         bool
+	Obsolete           bool
+	NoUserModification bool
+	MaxLength          string // formatted "N characters"; empty when absent
+	Usage              string
+	Aliases            []SchemaLink
+	UsedBy             []SchemaLink
+	BackList           string // "objectclass" or "attribute"
+	IsObjectClass      bool
 }
 
 // SchemaLink is a cross-navigation link (R5.x: clickable attribute/class names).
 type SchemaLink struct {
 	Name string
 	URL  string
+}
+
+// SchemaAttrLink is a MUST/MAY attribute link plus the objectClass that
+// declared it, so inherited attributes can be annotated (phpLDAPadmin
+// "Inherited from" parity).
+type SchemaAttrLink struct {
+	Name      string
+	URL       string
+	Source    string
+	SourceURL string
+	Inherited bool
 }
 
 // SchemaBrowser renders the read-only schema pages (R5, R5.x).
@@ -96,11 +119,12 @@ func (s *SchemaBrowser) ObjectClassDetail(w http.ResponseWriter, r *http.Request
 		return
 	}
 	data := SchemaDetailData{
-		Name:     name,
-		OID:      oc.OID,
-		Desc:     oc.Desc,
-		Kind:     oc.Kind,
-		BackList: "objectclass",
+		Name:          oc.Name,
+		OID:           oc.OID,
+		Desc:          oc.Desc,
+		Kind:          oc.Kind,
+		BackList:      "objectclass",
+		IsObjectClass: true,
 	}
 	for _, sup := range oc.Sup {
 		data.Sup = append(data.Sup, SchemaLink{
@@ -108,19 +132,36 @@ func (s *SchemaBrowser) ObjectClassDetail(w http.ResponseWriter, r *http.Request
 			URL:  "/api/schema/objectclass/" + url.PathEscape(sup),
 		})
 	}
-	for _, m := range oc.Must {
-		data.Must = append(data.Must, SchemaLink{
-			Name: m,
-			URL:  "/api/schema/attribute/" + url.PathEscape(m),
-		})
+	if strings.EqualFold(oc.Name, "top") {
+		// phpLDAPadmin renders every class as a child of top.
+		data.Children = []SchemaLink{{Name: "all", URL: "/api/schema/objectclass"}}
+	} else {
+		for _, child := range schema.ChildObjectClasses(oc.Name) {
+			data.Children = append(data.Children, SchemaLink{
+				Name: child,
+				URL:  "/api/schema/objectclass/" + url.PathEscape(child),
+			})
+		}
 	}
-	for _, m := range oc.May {
-		data.May = append(data.May, SchemaLink{
-			Name: m,
-			URL:  "/api/schema/attribute/" + url.PathEscape(m),
-		})
-	}
+	data.Must = schemaAttrLinks(schema.EffectiveMustAttrs(oc.Name), oc.Name)
+	data.May = schemaAttrLinks(schema.EffectiveMayAttrs(oc.Name), oc.Name)
 	s.renderPage(w, name+" — ldapact", "schema-detail-content", data)
+}
+
+// schemaAttrLinks converts source-tagged objectClass attributes into view
+// links, marking those inherited from a SUP ancestor.
+func schemaAttrLinks(attrs []ldapx.ObjectClassAttr, current string) []SchemaAttrLink {
+	links := make([]SchemaAttrLink, 0, len(attrs))
+	for _, a := range attrs {
+		links = append(links, SchemaAttrLink{
+			Name:      a.Name,
+			URL:       "/api/schema/attribute/" + url.PathEscape(a.Name),
+			Source:    a.Source,
+			SourceURL: "/api/schema/objectclass/" + url.PathEscape(a.Source),
+			Inherited: !strings.EqualFold(a.Source, current),
+		})
+	}
+	return links
 }
 
 // Attributes handles GET /api/schema/attribute.
@@ -166,24 +207,67 @@ func (s *SchemaBrowser) AttributeDetail(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	data := SchemaDetailData{
-		Name:        at.Name,
-		OID:         at.OID,
-		Desc:        at.Desc,
-		Syntax:      at.Syntax,
-		Equality:    at.Equality,
-		Ordering:    at.Ordering,
-		Substr:      at.Substr,
-		SingleValue: at.SingleValue,
-		Usage:       at.Usage,
-		BackList:    "attribute",
+		Name:               at.Name,
+		OID:                at.OID,
+		Desc:               at.Desc,
+		Syntax:             at.SyntaxOID,
+		SyntaxDesc:         schema.LDAPSyntaxes[at.SyntaxOID],
+		Equality:           at.Equality,
+		Ordering:           at.Ordering,
+		Substr:             at.Substr,
+		SingleValue:        at.SingleValue,
+		Collective:         at.Collective,
+		Obsolete:           at.Obsolete,
+		NoUserModification: at.NoUserModification,
+		MaxLength:          formatMaxLength(at.MaxLength),
+		Usage:              at.Usage,
+		BackList:           "attribute",
 	}
 	for _, sup := range at.Sup {
+		supName := sup
+		if sa, ok := schema.Attribute(sup); ok {
+			supName = sa.Name
+		}
 		data.Sup = append(data.Sup, SchemaLink{
-			Name: sup,
-			URL:  "/api/schema/attribute/" + url.PathEscape(sup),
+			Name: supName,
+			URL:  "/api/schema/attribute/" + url.PathEscape(supName),
+		})
+	}
+	for _, alias := range at.Names[1:] {
+		data.Aliases = append(data.Aliases, SchemaLink{
+			Name: alias,
+			URL:  "/api/schema/attribute/" + url.PathEscape(alias),
+		})
+	}
+	for _, oc := range schema.ObjectClassesUsing(at.Name) {
+		data.UsedBy = append(data.UsedBy, SchemaLink{
+			Name: oc,
+			URL:  "/api/schema/objectclass/" + url.PathEscape(oc),
 		})
 	}
 	s.renderPage(w, name+" — ldapact", "schema-detail-content", data)
+}
+
+// formatMaxLength renders a syntax {length} as a human-readable string with
+// thousands separators, e.g. 32768 → "32,768 characters". Empty means the
+// attributeType declares no maximum length.
+func formatMaxLength(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	s := strconv.Itoa(n)
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			b.WriteByte(',')
+		}
+		b.WriteByte(s[i])
+	}
+	unit := "characters"
+	if n == 1 {
+		unit = "character"
+	}
+	return b.String() + " " + unit
 }
 
 func (s *SchemaBrowser) renderPage(w http.ResponseWriter, title, content string, data any) {

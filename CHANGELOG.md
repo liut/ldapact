@@ -3,6 +3,23 @@
 All notable changes to ldapact v1 are tracked here, one entry per implementation
 unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
 
+## Schema browser detail pages (2026-08-30)
+
+- R5.x — schema detail pages now match the phpLDAPadmin layout.
+  - objectClass detail: dedicated "Inherits from" (SUP) and "Parent to"
+    (direct children) rows, plus a two-column Required/Optional attributes
+    table. MUST/MAY are resolved through the SUP chain, and attributes
+    inherited from an ancestor are annotated with the defining objectClass as
+    a cross-navigation link; `top` renders its children as the "all"
+    objectClasses list.
+  - attributeType detail: a label/value table covering Description, Obsolete,
+    Inherits from, Equality/Ordering/Substring, Syntax (resolved to its
+    ldapSyntaxes description plus OID), Single Valued, Collective, User
+    Modification, Usage, Maximum Length (from the SYNTAX `{N}` suffix),
+    Aliases, "Used by objectClasses" (direct MUST/MAY references), and Force
+    as MAY by config. The RFC 4512 parser now captures OBSOLETE, COLLECTIVE,
+    NO-USER-MODIFICATION and the syntax `{length}` suffix.
+
 ## Schema-driven edit form controls (2026-08-27)
 
 - U1 — Schema control classification: `pkg/ldapx` now derives the edit-form

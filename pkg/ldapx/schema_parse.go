@@ -2,6 +2,7 @@ package ldapx
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -156,10 +157,25 @@ func ParseAttributeType(s string) (*AttributeType, error) {
 		case "SYNTAX":
 			if i+1 < len(toks) {
 				at.Syntax = toks[i+1]
+				at.SyntaxOID = at.Syntax
+				if j := strings.IndexByte(at.Syntax, '{'); j >= 0 {
+					if end := strings.IndexByte(at.Syntax, '}'); end > j {
+						if n, err := strconv.Atoi(at.Syntax[j+1 : end]); err == nil {
+							at.MaxLength = n
+						}
+						at.SyntaxOID = at.Syntax[:j]
+					}
+				}
 				i++
 			}
 		case "SINGLE-VALUE":
 			at.SingleValue = true
+		case "COLLECTIVE":
+			at.Collective = true
+		case "OBSOLETE":
+			at.Obsolete = true
+		case "NO-USER-MODIFICATION":
+			at.NoUserModification = true
 		case "USAGE":
 			if i+1 < len(toks) {
 				at.Usage = toks[i+1]

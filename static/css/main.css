@@ -165,6 +165,33 @@ td {
   vertical-align: top;
 }
 
+/* Schema detail pages (R5.x). */
+.schema-detail th[scope="row"] {
+  width: 12rem;
+  white-space: nowrap;
+}
+
+.schema-attrs {
+  margin-top: 1rem;
+}
+
+.schema-attrs thead th {
+  background: #f0f4f9;
+}
+
+.schema-list {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.schema-list li {
+  margin-bottom: 0.35rem;
+}
+
+.schema-list small {
+  color: var(--color-muted);
+}
+
 .actions {
   list-style: none;
   padding: 0;
