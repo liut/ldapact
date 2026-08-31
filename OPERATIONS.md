@@ -2,19 +2,29 @@
 
 ## Secrets
 
-The resolver chain (env → 0600 file → TTY) applies to `LDAPADM_BIND_PASSWORD`
-and `LDAPADM_AUTO_NUMBER_PASSWORD`. No secret ever appears in config files, in
+The resolver chain (env → 0600 file → TTY) applies to `LDAPADM_SESSION_KEY`
+(required), and optionally `LDAPADM_REDIS_PASSWORD` and
+`LDAPADM_AUTO_NUMBER_PASSWORD`. `LDAPADM_BIND_PASSWORD` is deprecated and
+ignored — the bind credential is entered on the login page and stored
+encrypted in the session. No secret ever appears in config files, in
 `/proc/PID/environ`, or in logs (truncated fingerprints only).
 
 Examples:
 
-- **env**: `LDAPADM_BIND_PASSWORD='...' systemctl start ldapact`
-- **file**: `LDAPADM_BIND_PASSWORD_FILE=/run/credentials/ldapact.service/bind-password`
-- **systemd**: `LoadCredential=bind-password:/etc/ldapact/bind-password`
+- **env**: `LDAPADM_SESSION_KEY="$(openssl rand -base64 32)" systemctl start ldapact`
+- **file**: `LDAPADM_SESSION_KEY_FILE=/run/credentials/ldapact.service/session-key`
+- **systemd**: `LoadCredential=session-key:/etc/ldapact/session-key`
 - **k8s**: Secret mounted at `mode: 0600` (see `deploy/k8s/deployment.yaml`)
 
 Rotate by replacing the file/env value and restarting. Startup fails fast when
-the secret is missing or the file mode is wrong.
+the secret is missing or the file mode is wrong. **Rotating
+`LDAPADM_SESSION_KEY` invalidates every stored session** (their encrypted
+credentials can no longer be decrypted): users simply re-login — this is an
+accepted tradeoff for short-lived admin sessions.
+
+`LDAPADM_REDIS_PASSWORD` is optional: Redis without auth is allowed, and the
+resolver skips the TTY prompt when the variable and file reference are both
+absent.
 
 ### Moving from YAML to env
 
@@ -28,23 +38,62 @@ Under systemd, edit `/etc/default/ldapact` (see
 `deploy/systemd/ldapact.default.example`) — the unit file only references it via
 `EnvironmentFile`, so configuration changes never require editing the unit.
 
-## Sessions database
+## Session storage
+
+`LDAPADM_SESSION_STORE` selects the backend: `redis` (default, shared across
+instances), `bbolt` (single instance, on-disk), or `memory` (single instance,
+cleared on restart). Sessions hold the bind DN plus the bind password
+encrypted with AES-256-GCM under `LDAPADM_SESSION_KEY`; idle + absolute
+timeouts, rotation on state changes, and invalidation on logout work the same
+on every backend.
+
+### Redis (default, multi-instance)
+
+- Keys are `ldapa_sess:<id>`; the value is the JSON session record. A sliding
+  TTL implements the idle timeout (refreshed atomically via `GETEX`); the
+  absolute deadline is enforced from the value's timestamp (lazy deletion).
+  Expired keys are reaped by Redis itself — no sweeper.
+- Point every instance at the same Redis URL/database and the same
+  `LDAPADM_SESSION_KEY`; sessions are then usable from any instance with no
+  session affinity. Rotation, expiry, and logout take effect on every instance
+  immediately.
+- Startup fails fast when Redis is unreachable; runtime store failures render
+  503 (monitor for `session.store_error` events).
+
+### bbolt (single instance)
 
 `LDAPADM_DB_PATH` (default `/var/lib/ldapact/sessions.db`, mode 0600) holds
-the bbolt session store. When the variable is unset (or explicitly set to the
-default value) and `/var/lib/ldapact` does not exist, the store falls back to
-`~/.local/state/ldapact/sessions.db` (XDG-style per-user path) so
-unprivileged, dev, and container runs need no pre-created system directory;
-the parent directory is created with mode 0700 on first open. Lifecycle:
+the bbolt store. When the variable is unset (or explicitly set to the default
+value) and `/var/lib/ldapact` does not exist, the store falls back to
+`~/.local/state/ldapact/sessions.db` (XDG-style per-user path); the parent
+directory is created with mode 0700 on first open. The file now contains
+**encrypted credentials**, so backups and file permissions must cover it.
+Lifecycle:
 
 - **Backup**: stop the service, `cp sessions.db sessions.db.bak-$(date +%F)`,
   restart. (bbolt writes are atomic, but copy the file offline for a clean
   snapshot.)
 - **Corruption**: bbolt free-list validation aborts startup; the process exits
   with a structured error rather than serving 503s. Restore from the latest
-  backup; expired-session loss only forces an automatic re-login.
+  backup; expired-session loss only forces a re-login.
 - **Cleanup**: the built-in sweeper removes expired entries every 5 minutes;
   no manual cleanup is required.
+
+### memory (single instance, dev)
+
+In-process map with the same timeouts/rotation semantics; everything clears on
+restart. Useful for dev and ephemeral containers only.
+
+### Replica failover
+
+`LDAPADM_SERVERS` (comma-separated URLs, mutually exclusive with
+`LDAPADM_URL`) gives each replica its own unbound connection pool. Operations
+rotate their starting replica and fail over to the next on network-level
+errors (bounded at 2 attempts per replica); `invalidCredentials` (49) never
+failovers — the identity is shared across replicas, so a rejected bind means
+the credential is stale and the session is invalidated (redirect to login).
+When every replica is unreachable, the error names each replica's reason
+(look for `ldapx: all replicas failed`).
 
 ## Logging and audit (R15/AE6)
 

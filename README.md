@@ -46,9 +46,10 @@ make build
 export LDAPADM_URL='ldap://127.0.0.1:389'
 export LDAPADM_BASE_DN='dc=example,dc=com'
 export LDAPADM_BIND_DN='cn=admin,dc=example,dc=com'
-export LDAPADM_BIND_PASSWORD='your-secret'      # or LDAPADM_BIND_PASSWORD_FILE=/path/to/0600-file
+export LDAPADM_SESSION_KEY="$(openssl rand -base64 32)"   # AES-256-GCM session-key
+export LDAPADM_REDIS_URL='redis://127.0.0.1:6379'
 ./bin/ldapact
-open http://127.0.0.1:8389
+open http://127.0.0.1:8389/login   # log in with the admin bind DN + password
 ```
 
 `bin/ldapact --version` prints the version; `-config-help` prints the
@@ -70,9 +71,10 @@ reference (with descriptions) from the struct tags.
 | env var | default | notes |
 |---|---|---|
 | `LDAPADM_LISTEN` | `127.0.0.1:8389` | |
-| `LDAPADM_URL` | — (required) | `ldap://host:port` or `ldaps://host:port` |
+| `LDAPADM_URL` | — (required unless `SERVERS` set) | `ldap://host:port` or `ldaps://host:port`; mutually exclusive with `LDAPADM_SERVERS` |
+| `LDAPADM_SERVERS` | empty | comma-separated replica URLs; overrides `LDAPADM_URL` (replica failover) |
 | `LDAPADM_BASE_DN` | — (required) | |
-| `LDAPADM_BIND_DN` | — (required) | |
+| `LDAPADM_BIND_DN` | — (required) | shared admin bind DN, prefilled on the login page (editable) |
 | `LDAPADM_AUTO_NUMBER_DN` | empty | enables auto-numbering; also resolves `LDAPADM_AUTO_NUMBER_PASSWORD` |
 | `LDAPADM_MIN_VERSION` | `TLSv1.2` | `TLSv1.2` \| `TLSv1.3` (floor enforced) |
 | `LDAPADM_VERIFY` | `true` | `false` is rejected at startup |
@@ -85,19 +87,28 @@ reference (with descriptions) from the struct tags.
 | `LDAPADM_PASSWORD_SCHEME` | empty | password write scheme (default SSHA512; `SSHA` for legacy directories) |
 | `LDAPADM_TIMEOUT_MINUTES` | `30` | idle, 5..240 |
 | `LDAPADM_ABSOLUTE_TIMEOUT_MINUTES` | `480` | absolute, 30..1440 |
-| `LDAPADM_EXPIRED_ACTION` | `retry_bind` | `retry_bind` \| `redirect_to_login` |
-| `LDAPADM_DB_PATH` | `/var/lib/ldapact/sessions.db` | unset or set to the default: falls back to `~/.local/state/ldapact/sessions.db` when `/var/lib/ldapact` does not exist |
+| `LDAPADM_EXPIRED_ACTION` | `redirect_to_login` | expired sessions redirect to `/login` (`retry_bind` was removed) |
+| `LDAPADM_SESSION_STORE` | `redis` | `redis` \| `bbolt` \| `memory`; redis is shared across instances, bbolt/memory are single-instance |
+| `LDAPADM_REDIS_URL` | — (required when store=redis) | `redis://host:port` or `rediss://host:port` (TLS verification mandatory) |
+| `LDAPADM_REDIS_DB` | `0` | Redis logical database |
+| `LDAPADM_DB_PATH` | `/var/lib/ldapact/sessions.db` | bbolt only: unset or set to the default: falls back to `~/.local/state/ldapact/sessions.db` when `/var/lib/ldapact` does not exist |
+| `LDAPADM_SESSION_KEY` | — (required secret) | base64 of 32 bytes; AES-256-GCM key for session bind credentials; changing it invalidates all sessions |
 | `LDAPADM_LOG_LEVEL` | `info` | `debug`\|`info`\|`warn`\|`error` |
 | `LDAPADM_TEMPLATES_DIR` | empty | optional custom XML template directory |
 
 **Secrets are never parsed from the environment or stored in any config
-file.** The bind password (and the optional `auto_number` password) resolve
-through the chain:
+file.** `LDAPADM_SESSION_KEY` (required) and the optional
+`LDAPADM_REDIS_PASSWORD`/`LDAPADM_AUTO_NUMBER_PASSWORD` resolve through the
+chain:
 
-1. env var `LDAPADM_BIND_PASSWORD` (or `LDAPADM_AUTO_NUMBER_PASSWORD`)
-2. a 0600 file referenced by `LDAPADM_BIND_PASSWORD_FILE` (or
-   `LDAPADM_AUTO_NUMBER_PASSWORD_FILE`)
+1. env var (`LDAPADM_SESSION_KEY`, `LDAPADM_REDIS_PASSWORD`,
+   `LDAPADM_AUTO_NUMBER_PASSWORD`)
+2. a 0600 file referenced by the `_FILE` variant
 3. interactive TTY prompt (fails fast when no TTY is available)
+
+`LDAPADM_BIND_PASSWORD` is deprecated and ignored: the bind credential is
+entered on the login page, verified against the directory, and stored
+encrypted in the session.
 
 ## Deployment models
 
@@ -110,8 +121,10 @@ ldapact is designed for loopback, internal-VPN, or mTLS-fronted deployments
   secret files.
 - **Kubernetes**: `deploy/k8s/deployment.yaml` (ConfigMap + Secret + probes).
 - **Container**: `Dockerfile` produces a distroless static image; run with
-  only environment variables and `LDAPADM_BIND_PASSWORD_FILE` (no mounted
-  config file).
+  only environment variables and secret files (no mounted config file).
+- **Multi-instance**: point every instance at the same Redis and the same
+  `LDAPADM_SESSION_KEY`; sessions (and their encrypted credentials) are then
+  usable from any instance without session affinity (R14).
 
 See [OPERATIONS.md](OPERATIONS.md) for the runbook: secret resolver examples,
 sessions.db lifecycle, log shipping, TLS rotation, cutover playbook, and the
@@ -119,13 +132,23 @@ v1 pre-launch checklist.
 
 ## Security model
 
-- Fail-fast startup bind: the process refuses to start when the directory is
-  unreachable or the certificate is expired.
+- Fail-fast startup probe: the process refuses to start when the directory is
+  unreachable or the certificate is expired; credential validation happens at
+  login instead of startup.
 - TLS 1.2 floor, mandatory verification, StartTLS-only (no plaintext
   fallback).
+- Login gate: every page (except `/healthz`, `/static/*`, `/login`) requires
+  a session minted by `/login`; expired or invalidated sessions redirect to
+  `/login`.
 - Sessions: 256-bit opaque IDs in a `__Host-LDAPADM_SID` cookie
-  (Secure/HttpOnly/SameSite=Strict), on-disk store with idle + absolute
-  timeouts, rotation on every state change, 5-minute sweeper.
+  (Secure/HttpOnly/SameSite=Strict); Redis store by default (bbolt/memory for
+  single instances) with idle + absolute timeouts and rotation on every state
+  change; the bind credential rides along encrypted (AES-256-GCM) and is
+  never written to cookies, logs, or pages.
+- Operations bind per request with the session credential (no shared
+  configured password); replica failover on network errors with rotating
+  start points, never on `invalidCredentials` (that invalidates the session
+  and redirects to login).
 - CSRF: SameSite=Strict + Origin-header check on state-changing methods.
 - Security headers: CSP (Report-Only initially), HSTS over TLS, nosniff,
   `X-Frame-Options: DENY`, Referrer-Policy, Permissions-Policy.

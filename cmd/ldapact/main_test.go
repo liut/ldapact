@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
@@ -10,8 +11,69 @@ import (
 	"time"
 
 	"github.com/liut/ldapact/internal/app"
+	"github.com/liut/ldapact/pkg/config"
 	"github.com/liut/ldapact/pkg/session"
 )
+
+func testSessionCfg() *config.Config {
+	return &config.Config{
+		Session: config.SessionConfig{
+			TimeoutMinutes:         30,
+			AbsoluteTimeoutMinutes: 480,
+		},
+	}
+}
+
+func TestNewSessionStoreMemoryIgnoresDBPath(t *testing.T) {
+	cfg := testSessionCfg()
+	cfg.Session.Store = config.SessionStoreMemory
+	cfg.Session.DBPath = "/definitely/not/used/sessions.db"
+	s, err := newSessionStore(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("newSessionStore(memory): %v", err)
+	}
+	defer s.Close()
+	if _, err := s.Create("id", "cn=admin,dc=example,dc=com", "ldap://replica-1", []byte("enc")); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, err := s.Get("id"); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+}
+
+func TestNewSessionStoreBboltUsesDBPath(t *testing.T) {
+	cfg := testSessionCfg()
+	cfg.Session.Store = config.SessionStoreBbolt
+	cfg.Session.DBPath = t.TempDir() + "/sessions.db"
+	s, err := newSessionStore(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("newSessionStore(bbolt): %v", err)
+	}
+	defer s.Close()
+	if _, err := s.Create("persist", "p", "srv", nil); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := newSessionStore(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer reopened.Close()
+	if _, err := reopened.Get("persist"); err != nil {
+		t.Errorf("bbolt session must survive reopen (R17): %v", err)
+	}
+}
+
+func TestNewSessionStoreRedisUnreachableFails(t *testing.T) {
+	cfg := testSessionCfg()
+	cfg.Session.Store = config.SessionStoreRedis
+	cfg.Session.RedisURL = "redis://127.0.0.1:1" // closed port: fail-fast
+	if _, err := newSessionStore(context.Background(), cfg); err == nil {
+		t.Fatal("want fail-fast error when Redis is unreachable")
+	}
+}
 
 func TestNewHandlerHealthz(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))

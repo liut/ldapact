@@ -63,3 +63,18 @@ func (s *BboltStore) SweepLoop(interval time.Duration, stop <-chan struct{}) {
 func (s *MemoryStore) SweepLoop(interval time.Duration, stop <-chan struct{}) {
 	sweepLoop(s, interval, stop)
 }
+
+// SweepLoopStarter is implemented by backends with a periodic sweeper
+// (bbolt, memory). Redis relies on key TTL expiry instead (Sweep is a
+// no-op), so it does not implement this.
+type SweepLoopStarter interface {
+	SweepLoop(interval time.Duration, stop <-chan struct{})
+}
+
+// StartSweepLoop runs the periodic sweeper when the backend supports one.
+// Callers close stop to stop the loop (the store is not closed).
+func StartSweepLoop(s Store, interval time.Duration, stop <-chan struct{}) {
+	if sl, ok := s.(SweepLoopStarter); ok {
+		go sl.SweepLoop(interval, stop)
+	}
+}

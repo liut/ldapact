@@ -3,6 +3,46 @@
 All notable changes to ldapact v1 are tracked here, one entry per implementation
 unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
 
+## External session store and login gate (2026-08-31)
+
+One entry per implementation unit of
+`docs/plans/2026-08-31-001-feat-session-store-login-gate-plan.md`:
+
+- `refactor(session)` — the bbolt store becomes the `Store` interface
+  (Create/Get/Rotate/Delete/Sweep/Close); `Value` gains `ServerRef` and
+  `Credential` (encrypted bind credential) fields; a memory backend with the
+  same timeout/rotation semantics is added (bbolt persists, memory clears on
+  restart).
+- `feat(config)` — `LDAPADM_SESSION_STORE` (default `redis`),
+  `LDAPADM_REDIS_URL`/`LDAPADM_REDIS_DB`/`LDAPADM_REDIS_PASSWORD`,
+  `LDAPADM_SESSION_KEY` (required secret), and `LDAPADM_SERVERS` (replica
+  list, mutually exclusive with `LDAPADM_URL`); `expired_action` defaults to
+  `redirect_to_login` and `retry_bind` is rejected; `LDAPADM_BIND_PASSWORD`
+  is deprecated and no longer resolved.
+- `feat(session)` — Redis session backend: JSON records under
+  `ldapa_sess:<id>`, sliding TTL via `GETEX`, atomic `RENAME` rotation, lazy
+  absolute expiry; shared across instances (unit tests use miniredis, gated
+  integration tests use a real Redis backend).
+- `feat(session)` — AES-256-GCM credential cipher: versioned envelope with a
+  per-record nonce; corrupt vs key-mismatch error classes; key comes from
+  `LDAPADM_SESSION_KEY`.
+- `feat(ldapx)` — the main pool is unbound: every operation binds with the
+  request-scoped credential from the context; the schema cache loads lazily
+  on the first authenticated operation; `VerifyBind` (dial + bind + close)
+  backs the login gate; invalidCredentials is typed and never retried.
+- `feat(authn)` — login gate: `/healthz`, `/static/*`, and `/login` are
+  public, everything else requires a session and redirects to `/login`;
+  login verifies the bind DN + password and stores the encrypted credential;
+  logout deletes the session and clears the cookie; invalidCredentials
+  invalidates the session and redirects to login (entry/tree/search/ldif
+  error paths wired).
+- `feat(ldapx)` — replica failover: one unbound pool per `LDAPADM_SERVERS`
+  URL, rotating start points, bounded failover on network errors only,
+  aggregate error naming each replica when all are down.
+- `feat(main)` — session store factory wiring (redis/bbolt/memory), cipher
+  construction, replica-aware client, and the startup probe no longer binds;
+  README/OPERATIONS/.env.example updated and CHANGELOG entries kept in sync.
+
 ## LDAP server troubleshooting docs (2026-08-31)
 
 - OPERATIONS.md gains a directory-server troubleshooting section: diagnosing

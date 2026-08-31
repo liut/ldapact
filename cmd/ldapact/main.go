@@ -97,20 +97,28 @@ func run(args []string) int {
 
 	ldapClient, err := ldapx.New(ctx, cfg, logger)
 	if err != nil {
-		logger.Error("LDAP startup bind failed (fail-fast, R14)",
-			"event", "ldap.bind.failed",
+		logger.Error("LDAP startup dial failed (fail-fast, R15)",
+			"event", "ldap.dial.failed",
 			"error", err)
 		return 1
 	}
 	defer ldapClient.Close()
-	logger.Info("LDAP bound",
-		"event", "ldap.bind.ok",
+	replicas := len(cfg.LDAP.Servers)
+	if replicas == 0 {
+		replicas = 1
+	}
+	logger.Info("LDAP replicas ready",
+		"event", "ldap.dial_ok",
+		"replicas", replicas,
 		"base_dn", cfg.LDAP.BaseDN)
 
-	sessionStore, err := session.NewStore(
-		cfg.Session.DBPath,
-		time.Duration(cfg.Session.TimeoutMinutes)*time.Minute,
-		time.Duration(cfg.Session.AbsoluteTimeoutMinutes)*time.Minute)
+	cipher, err := session.NewCredentialCipher(cfg.SessionKey)
+	if err != nil {
+		logger.Error("session credential cipher failed", "event", "session.cipher_failed", "error", err)
+		return 1
+	}
+
+	sessionStore, err := newSessionStore(ctx, cfg)
 	if err != nil {
 		logger.Error("session store failed to open", "event", "session.store_open_failed", "error", err)
 		return 1
@@ -118,21 +126,21 @@ func run(args []string) int {
 	defer sessionStore.Close()
 	stopSweep := make(chan struct{})
 	defer close(stopSweep)
-	go sessionStore.SweepLoop(5*time.Minute, stopSweep)
+	session.StartSweepLoop(sessionStore, 5*time.Minute, stopSweep)
 
 	logger.Info("starting ldapact",
 		"event", "server.start",
 		"version", version,
 		"commit", commit,
 		"listen", cfg.Server.Listen,
-		"db_path", cfg.Session.DBPath,
+		"session_store", cfg.Session.Store,
 		"base_dn", cfg.LDAP.BaseDN,
 		"bind_dn", cfg.LDAP.BindDN,
 	)
 
 	srv := &http.Server{
 		Addr:              cfg.Server.Listen,
-		Handler:           app.NewHandler(app.Deps{Logger: logger, LDAP: ldapClient, Store: sessionStore, Cfg: cfg}),
+		Handler:           app.NewHandler(app.Deps{Logger: logger, LDAP: ldapClient, Store: sessionStore, Cipher: cipher, Cfg: cfg}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	serveErr := make(chan error, 1)
@@ -150,4 +158,24 @@ func run(args []string) int {
 		_ = srv.Shutdown(shutdownCtx)
 	}
 	return 0
+}
+
+// newSessionStore builds the configured session backend (R1/U8): Redis
+// (default), bbolt (non-default compatibility), or memory. Redis and bbolt
+// fail fast when their backing store is unreachable/invalid.
+func newSessionStore(ctx context.Context, cfg *config.Config) (session.Store, error) {
+	idle := time.Duration(cfg.Session.TimeoutMinutes) * time.Minute
+	absolute := time.Duration(cfg.Session.AbsoluteTimeoutMinutes) * time.Minute
+	switch cfg.Session.Store {
+	case config.SessionStoreRedis:
+		return session.NewRedisStore(ctx, session.RedisOptions{
+			URL:      cfg.Session.RedisURL,
+			Password: cfg.RedisPassword,
+			DB:       cfg.Session.RedisDB,
+		}, idle, absolute)
+	case config.SessionStoreMemory:
+		return session.NewMemoryStore(idle, absolute), nil
+	default: // bbolt (R17): LDAPADM_DB_PATH applies here.
+		return session.NewStore(cfg.Session.DBPath, idle, absolute)
+	}
 }
