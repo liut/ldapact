@@ -21,11 +21,19 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install lint tools
-        run: make tools
+      - name: Check gofmt
+        run: test -z "$(gofmt -l .)"
 
-      - name: Run lint
-        run: make lint
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.13.2
+
+      - name: Run govulncheck
+        uses: golang/govulncheck-action@v1
 
   test:
     name: Build & Test
@@ -44,10 +52,13 @@ jobs:
           node-version: 22
 
       - name: Build
-        run: make build
+        run: go build ./...
 
       - name: Unit + integration tests
-        run: make test
+        run: go test ./...
 
       - name: JS tests
-        run: make test-js
+        run: |
+          node test/js/autofill_test.js
+          node test/js/tree_keys_test.js
+          node test/js/edit_multi_test.js

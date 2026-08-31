@@ -3,8 +3,8 @@ BIN := bin/ldapact
 VERSION ?= dev
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 SOURCES := $(shell find cmd pkg -type f -name '*.go' ! -name '*_test.go')
-# Lint tool versions; pin with STATICCHECK_VERSION / GOVULNCHECK_VERSION.
-STATICCHECK_VERSION ?= latest
+# Lint tool versions; pin with GOLANGCI_LINT_VERSION / GOVULNCHECK_VERSION.
+GOLANGCI_LINT_VERSION ?= v2.13.2
 GOVULNCHECK_VERSION ?= latest
 # This repo sits under a parent go.work that does not list it; build standalone.
 GOWORK ?= off
@@ -12,7 +12,7 @@ export GOWORK
 
 LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
-.PHONY: build dist test test-integration test-js lint tools fmt vet staticcheck govulncheck run clean
+.PHONY: build dist test test-integration test-js lint tools fmt vet golangci-lint govulncheck run clean
 
 build:
 	CGO_ENABLED=0 $(GO) build -trimpath -o $(BIN) -ldflags "$(LDFLAGS)" ./cmd/ldapact
@@ -47,10 +47,10 @@ test-js:
 	node test/js/edit_multi_test.js
 
 tools:
-	go install honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION)
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 	go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 
-lint: fmt vet staticcheck govulncheck
+lint: fmt vet golangci-lint govulncheck
 
 fmt:
 	@out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "gofmt needed on:"; echo "$$out"; exit 1; fi
@@ -58,8 +58,8 @@ fmt:
 vet:
 	$(GO) vet ./...
 
-staticcheck:
-	@if command -v staticcheck >/dev/null 2>&1; then staticcheck ./...; else echo "staticcheck not installed — run: make tools"; exit 1; fi
+golangci-lint:
+	@if command -v golangci-lint >/dev/null 2>&1; then golangci-lint run ./...; else echo "golangci-lint not installed — run: make tools"; exit 1; fi
 
 govulncheck:
 	@if command -v govulncheck >/dev/null 2>&1; then govulncheck ./...; else echo "govulncheck not installed — run: make tools (skipping)"; fi

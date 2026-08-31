@@ -17,14 +17,19 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install lint tools
-        run: make tools
+      - name: Check gofmt
+        run: test -z "$(gofmt -l .)"
 
-      - name: Vet & lint
-        run: |
-          make fmt
-          go vet ./...
-          staticcheck ./...
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.13.2
+
+      - name: Run govulncheck
+        uses: golang/govulncheck-action@v1
 
   build:
     name: build-and-release
@@ -46,13 +51,16 @@ jobs:
 
       - name: Build all platforms
         env:
-          CGO_ENABLED: 0
           VERSION: ${{ steps.version.outputs.VERSION }}
         run: |
-          make dist/linux_amd64/ldapact
-          make dist/darwin_amd64/ldapact
-          make dist/darwin_arm64/ldapact
-          make dist/windows_amd64/ldapact
+          set -e
+          COMMIT="${GITHUB_SHA::7}"
+          LDFLAGS="-X main.version=${VERSION} -X main.commit=${COMMIT}"
+          mkdir -p dist/linux_amd64 dist/darwin_amd64 dist/darwin_arm64 dist/windows_amd64
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o dist/linux_amd64/ldapact -ldflags "$LDFLAGS" ./cmd/ldapact
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -o dist/darwin_amd64/ldapact -ldflags "$LDFLAGS" ./cmd/ldapact
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -o dist/darwin_arm64/ldapact -ldflags "$LDFLAGS" ./cmd/ldapact
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -o dist/windows_amd64/ldapact.exe -ldflags "$LDFLAGS" ./cmd/ldapact
 
       - name: Package
         run: |

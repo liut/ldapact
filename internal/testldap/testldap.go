@@ -219,14 +219,14 @@ func dockerAvailable() bool {
 
 func dockerInstance(ctx context.Context) (*Instance, error) {
 	req := testcontainers.ContainerRequest{
-		Image:        "docker.io/bitnami/openldap:2.6",
-		ExposedPorts: []string{"1389/tcp"},
+		Image:        openldapImage(),
+		ExposedPorts: []string{"389/tcp"},
 		Env: map[string]string{
-			"LDAP_ADMIN_USERNAME": "admin",
+			"LDAP_ADMIN_NAME":     "admin",
 			"LDAP_ADMIN_PASSWORD": AdminPassword,
-			"LDAP_ROOT":           BaseDN,
+			"LDAP_BASE_DN":        BaseDN,
 		},
-		WaitingFor: wait.ForListeningPort("1389/tcp").WithStartupTimeout(120 * time.Second),
+		WaitingFor: wait.ForListeningPort("389/tcp").WithStartupTimeout(120 * time.Second),
 	}
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: req,
@@ -235,7 +235,7 @@ func dockerInstance(ctx context.Context) (*Instance, error) {
 	if err != nil {
 		return nil, fmt.Errorf("testldap: start OpenLDAP container: %w", err)
 	}
-	port, err := container.MappedPort(ctx, "1389/tcp")
+	port, err := container.MappedPort(ctx, "389/tcp")
 	if err != nil {
 		_ = testcontainers.TerminateContainer(container)
 		return nil, fmt.Errorf("testldap: mapped port: %w", err)
@@ -247,6 +247,15 @@ func dockerInstance(ctx context.Context) (*Instance, error) {
 		BaseDN:        BaseDN,
 		stop:          func() { _ = testcontainers.TerminateContainer(container) },
 	}, nil
+}
+
+// openldapImage returns the Docker image for the ephemeral test container.
+// LDAPADM_TEST_LDAP_IMAGE overrides the default.
+func openldapImage() string {
+	if img := strings.TrimSpace(os.Getenv("LDAPADM_TEST_LDAP_IMAGE")); img != "" {
+		return img
+	}
+	return "docker.io/liut7/staffio-ldap"
 }
 
 // localInstance starts an ephemeral foreground slapd from generated files.

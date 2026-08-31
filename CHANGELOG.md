@@ -3,6 +3,25 @@
 All notable changes to ldapact v1 are tracked here, one entry per implementation
 unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
 
+## Test LDAP image switch (2026-08-31)
+
+- The Docker integration backend now uses `liut7/staffio-ldap` (Alpine
+  OpenLDAP, port 389, `LDAP_ADMIN_NAME`/`LDAP_BASE_DN` env) instead of the
+  removed `bitnami/openldap:2.6` tag; the image is overridable via
+  `LDAPADM_TEST_LDAP_IMAGE`.
+
+## Lint unified on golangci-lint (2026-08-31)
+
+- `make lint` now runs gofmt + vet + golangci-lint (v2.13.2) + govulncheck;
+  standalone staticcheck is gone. `.golangci.yml` enables govet/ineffassign/
+  staticcheck/unused (errcheck off — its findings were idiomatic ignored
+  `Close`/`Write` errors).
+- Workflows no longer depend on make: lint uses the golangci-lint action (v9)
+  and the official govulncheck action plus direct go commands; test and
+  release steps run go/node directly.
+- Fixed the md4 nolint directive for golangci-lint and the reported
+  staticcheck/ineffassign findings.
+
 ## Dependency security bumps (2026-08-31)
 
 - `govulncheck` in CI flagged the testcontainers tar path (moby/go-archive).

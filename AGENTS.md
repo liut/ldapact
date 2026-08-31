@@ -42,13 +42,14 @@ make dist             # cross-platform release binaries under dist/
 make test             # unit + integration tests (integration skips when no backend detected)
 make test-integration # end-to-end F1-F8 vs the detected backend
 make test-js          # node test/js/*_test.js
-make lint             # gofmt + go vet + staticcheck + govulncheck
-make tools            # install staticcheck + govulncheck (lint prerequisites)
+make lint             # gofmt + go vet + golangci-lint + govulncheck
+make tools            # install golangci-lint + govulncheck (lint prerequisites)
 make run              # go run ./cmd/ldapact (needs LDAPADM_* env; see README "Configuration")
 
-CI mirrors these targets in `.github/workflows`: `ci` (parallel lint and test
-jobs; Docker-backed integration on ubuntu runners) and `release` (tag `v*` ->
-multi-platform binaries + GitHub Release).
+CI in `.github/workflows` does not invoke make: `ci` runs lint via the
+golangci-lint and govulncheck GitHub Actions plus direct go/node commands, and
+tests (Docker-backed integration on ubuntu runners); `release` builds
+multi-platform binaries and publishes on tag `v*`.
 ```
 
 The Makefile exports `GOWORK=off` because this repo is not listed in the
@@ -65,7 +66,8 @@ variables (strict allowlist), so unset them before running the server.
 service:
 
 1. `LDAPADM_TEST_LDAP_URL` — caller-provisioned dedicated test server.
-2. Docker — ephemeral `bitnami/openldap:2.6` container (testcontainers-go).
+2. Docker — ephemeral `liut7/staffio-ldap` container (testcontainers-go);
+   override the image with `LDAPADM_TEST_LDAP_IMAGE`.
 3. Local `slapd` — ephemeral foreground instance with a generated config and
    temp data directory on a random `127.0.0.1` port. System configs, data
    directories, pidfiles, and launchd/systemd services are never read or

@@ -19,8 +19,7 @@ import (
 	_ "github.com/GehirnInc/crypt/sha512_crypt"
 	"github.com/alexedwards/argon2id"
 	"golang.org/x/crypto/bcrypt"
-	//lint:ignore SA1019 MD4 required for AD userPassword compatibility (KTD 6)
-	"golang.org/x/crypto/md4"
+	"golang.org/x/crypto/md4" //nolint:staticcheck // MD4 required for AD userPassword compatibility (KTD 6)
 )
 
 // DefaultHashScheme is the write default per KTD 6 (SSHA512 preferred).

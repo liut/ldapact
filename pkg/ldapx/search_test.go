@@ -18,7 +18,7 @@ type pagingFake struct {
 }
 
 func (f *pagingFake) Search(req *ldap.SearchRequest) (*ldap.SearchResult, error) {
-	f.fakeConn.searchCalls.Add(1)
+	f.searchCalls.Add(1)
 	ctrlAny := ldap.FindControl(req.Controls, ldap.ControlTypePaging)
 	if ctrlAny == nil {
 		// Validation search from Pool.Put: just answer successfully.
@@ -31,7 +31,7 @@ func (f *pagingFake) Search(req *ldap.SearchRequest) (*ldap.SearchResult, error)
 		}
 	}
 	ctrl := ctrlAny.(*ldap.ControlPaging)
-	page := 1
+	var page int
 	switch string(ctrl.Cookie) {
 	case "":
 		page = 1

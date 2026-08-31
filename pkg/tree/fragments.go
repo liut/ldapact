@@ -144,7 +144,7 @@ func (t *Tree) renderFragment(w http.ResponseWriter, data ChildrenData) {
 func buildNodes(entries []*ldap.Entry, level int) []Node {
 	nodes := make([]Node, 0, len(entries))
 	for i, e := range entries {
-		hasChildren := !(e.GetAttributeValue("hassubordinates") == "false")
+		hasChildren := e.GetAttributeValue("hassubordinates") != "false"
 		nodes = append(nodes, Node{
 			ID:          fmt.Sprintf("n%d", i),
 			DN:          e.DN,
