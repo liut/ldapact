@@ -177,7 +177,7 @@ func (p *Pool) Do(ctx context.Context, fn func(Conn) error) error {
 			case <-ctx.Done():
 				return ctx.Err()
 			}
-			c, err = p.Get(ctx)
+			c, err = p.getRetry(ctx, attempt)
 			if err != nil {
 				return err
 			}
@@ -195,6 +195,23 @@ func (p *Pool) Do(ctx context.Context, fn func(Conn) error) error {
 		}
 		p.Put(c)
 		return err
+	}
+}
+
+// getRetry bounds the retry wait for a replacement connection: a single-conn
+// pool that just dropped its sick connection must not block the request
+// forever — the caller (or the replica layer) moves on.
+func (p *Pool) getRetry(ctx context.Context, attempt int) (Conn, error) {
+	select {
+	case c := <-p.conns:
+		if c == nil {
+			return nil, ErrPoolClosed
+		}
+		return c, nil
+	case <-time.After(backoffFor(attempt) + 50*time.Millisecond):
+		return nil, errNoRetryConn
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
 }
 

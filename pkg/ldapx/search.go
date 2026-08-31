@@ -99,43 +99,51 @@ func (c *Client) Page(ctx context.Context, opts SearchOptions, page int) (*PageR
 	if opts.BaseDN == "" && !opts.AllowEmptyBase {
 		opts.BaseDN = c.baseDN
 	}
+	return c.pool.Page(ctx, opts, page)
+}
 
-	conn, err := c.pool.Get(ctx)
+// Page runs one replica's connection-scoped paged search loop (U7): the
+// whole multi-page walk runs on ONE pooled connection because LDAP
+// paged-result sessions are connection-scoped (sending a cookie on another
+// connection yields "paged results cookie is invalid").
+func (p *Pool) Page(ctx context.Context, opts SearchOptions, page int) (*PageResult, error) {
+
+	conn, err := p.Get(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if err := c.pool.bindFor(ctx, conn); err != nil {
+	if err := p.bindFor(ctx, conn); err != nil {
 		conn.Close()
 		return nil, err
 	}
 	for attempt := 1; ; attempt++ {
 		res, perr := pageLoop(ctx, conn, opts, page)
 		if perr == nil {
-			c.pool.Put(conn)
+			p.Put(conn)
 			return res, nil
 		}
 		if attempt == 1 && isRetryable(perr) {
-			if c.pool.opts.BindDN == "" {
+			if p.opts.BindDN == "" {
 				conn.Close()
 			} else {
-				_ = c.pool.Put(conn) // validates and drops the sick conn
+				_ = p.Put(conn) // validates and drops the sick conn
 			}
 			select {
 			case <-time.After(backoffFor(attempt)):
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			}
-			conn, err = c.pool.Get(ctx)
+			conn, err = p.getRetry(ctx, attempt)
 			if err != nil {
 				return nil, err
 			}
-			if err := c.pool.bindFor(ctx, conn); err != nil {
+			if err := p.bindFor(ctx, conn); err != nil {
 				conn.Close()
 				return nil, err
 			}
 			continue
 		}
-		c.pool.Put(conn)
+		p.Put(conn)
 		return nil, perr
 	}
 }

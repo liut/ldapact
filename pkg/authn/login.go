@@ -2,6 +2,7 @@ package authn
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -27,21 +28,27 @@ type LoginHandler struct {
 	client    *ldapx.Client // optional; warms the schema cache on login
 	render    *web.Renderer
 	logger    *slog.Logger
-	dial      ldapx.DialOptions
 	serverRef string
 	bindDN    string
-	// verify is swappable in tests; production uses ldapx.VerifyBind.
-	verify func(context.Context, ldapx.DialOptions, string, string) error
+	// verify is swappable in tests; production verifies through the
+	// replica-aware client.
+	verify func(context.Context, string, string) error
 }
 
 // NewLogin builds the login/logout handler.
 func NewLogin(store session.Store, cipher *session.CredentialCipher, client *ldapx.Client,
-	renderer *web.Renderer, logger *slog.Logger, dial ldapx.DialOptions, serverRef, bindDN string) *LoginHandler {
-	return &LoginHandler{
+	renderer *web.Renderer, logger *slog.Logger, serverRef, bindDN string) *LoginHandler {
+	h := &LoginHandler{
 		store: store, cipher: cipher, client: client, render: renderer,
-		logger: logger, dial: dial, serverRef: serverRef, bindDN: bindDN,
-		verify: ldapx.VerifyBind,
+		logger: logger, serverRef: serverRef, bindDN: bindDN,
 	}
+	h.verify = func(ctx context.Context, dn, password string) error {
+		if client == nil {
+			return errors.New("authn: LDAP client not configured")
+		}
+		return client.VerifyBind(ctx, dn, password)
+	}
+	return h
 }
 
 // ServeHTTP routes GET /login and POST /login. The route is public
@@ -83,7 +90,7 @@ func (h *LoginHandler) submit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := ldapx.WithCredential(r.Context(), ldapx.BindCredential{DN: dn, Password: password})
-	if err := h.verify(ctx, h.dial, dn, password); err != nil {
+	if err := h.verify(ctx, dn, password); err != nil {
 		if h.logger != nil {
 			h.logger.Warn("login failed",
 				"event", "session.login_failed",

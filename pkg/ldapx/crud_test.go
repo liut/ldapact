@@ -21,7 +21,7 @@ func TestAddCanonicalizesAndSends(t *testing.T) {
 		got = req
 		return nil
 	}}
-	c := &Client{pool: newTestPool(f), schema: s}
+	c := &Client{pool: singleReplica(newTestPool(f)), schema: s}
 	err = c.Add(context.Background(), "cn=alice,dc=example,dc=com", map[string][]string{
 		"CN": {"alice"},
 		"SN": {"Smith"},
@@ -50,7 +50,7 @@ func TestModifySendsChanges(t *testing.T) {
 		got = req
 		return nil
 	}}
-	c := &Client{pool: newTestPool(f)}
+	c := &Client{pool: singleReplica(newTestPool(f))}
 	changes := []ldap.Change{
 		{Operation: ldap.ReplaceAttribute, Modification: ldap.PartialAttribute{Type: "description", Vals: []string{"new"}}},
 	}
@@ -69,7 +69,7 @@ func TestDeleteSendsRequest(t *testing.T) {
 		gotDN = req.DN
 		return ldap.NewError(32, errors.New("no such object"))
 	}}
-	c := &Client{pool: newTestPool(f)}
+	c := &Client{pool: singleReplica(newTestPool(f))}
 	err := c.Delete(context.Background(), "cn=bob,dc=example,dc=com")
 	if gotDN != "cn=bob,dc=example,dc=com" {
 		t.Errorf("deleted DN = %q", gotDN)
@@ -86,7 +86,7 @@ func TestModifyDNSendsRequest(t *testing.T) {
 		got = req
 		return nil
 	}}
-	c := &Client{pool: newTestPool(f)}
+	c := &Client{pool: singleReplica(newTestPool(f))}
 	err := c.ModifyDN(context.Background(), "cn=bob,ou=People,dc=example,dc=com",
 		"cn=robert", true, "ou=Archive,dc=example,dc=com")
 	if err != nil {
@@ -104,7 +104,7 @@ func TestPasswordModifySendsRequest(t *testing.T) {
 		got = req
 		return &ldap.PasswordModifyResult{}, nil
 	}}
-	c := &Client{pool: newTestPool(f)}
+	c := &Client{pool: singleReplica(newTestPool(f))}
 	err := c.PasswordModify(context.Background(), "cn=alice,dc=example,dc=com", "NewPass#2026")
 	if err != nil {
 		t.Fatalf("PasswordModify: %v", err)

@@ -18,6 +18,10 @@ var (
 	ErrPoolClosed     = errors.New("ldapx: pool closed")
 	ErrStartTLSFailed = errors.New("ldapx: StartTLS failed")
 	ErrTLSCertExpired = errors.New("ldapx: LDAP TLS certificate expired")
+	// errNoRetryConn is returned when the retry wait could not obtain a
+	// replacement connection (single-conn pool draining after a drop).
+	// Replicas treat it as a replica-level network failure and fail over.
+	errNoRetryConn = errors.New("ldapx: no connection available for retry")
 )
 
 // LDAPError wraps an LDAP operation failure with the result code and target
@@ -70,6 +74,9 @@ func wrapError(op, dn string, err error) error {
 // isRetryable reports whether an operation failure is a network-level error
 // that warrants a single retry on a fresh connection (KTD 5).
 func isRetryable(err error) bool {
+	if errors.Is(err, errNoRetryConn) {
+		return true
+	}
 	var le *ldap.Error
 	if errors.As(err, &le) {
 		return le.ResultCode == ldap.ErrorNetwork || le.ResultCode == ldap.LDAPResultServerDown

@@ -33,15 +33,6 @@ type Deps struct {
 	Cfg    *config.Config
 }
 
-// ldapTLS returns the TLS posture for the login dial, tolerating a nil
-// config (health-only handler chains).
-func ldapTLS(cfg *config.Config) config.TLSConfig {
-	if cfg == nil {
-		return config.TLSConfig{}
-	}
-	return cfg.LDAP.TLS
-}
-
 // NewHandler assembles the request chain (recover -> request id -> security
 // headers -> session -> csrf -> rate limit -> routes).
 func NewHandler(d Deps) http.Handler {
@@ -78,9 +69,7 @@ func NewHandler(d Deps) http.Handler {
 			}
 			bindDN = d.Cfg.LDAP.BindDN
 		}
-		loginHandler = authn.NewLogin(d.Store, d.Cipher, d.LDAP, renderer, d.Logger,
-			ldapx.DialOptions{URL: serverRef, TLS: ldapTLS(d.Cfg), Logger: d.Logger},
-			serverRef, bindDN)
+		loginHandler = authn.NewLogin(d.Store, d.Cipher, d.LDAP, renderer, d.Logger, serverRef, bindDN)
 	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

@@ -17,16 +17,15 @@ import (
 	"github.com/liut/ldapact/pkg/web"
 )
 
-func newLoginHandler(t *testing.T, store session.Store, client *ldapx.Client,
-	dial ldapx.DialOptions, serverRef, bindDN string) *LoginHandler {
+func newLoginHandler(t *testing.T, store session.Store, client *ldapx.Client, serverRef, bindDN string) *LoginHandler {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return NewLogin(store, testCipher(t), client, web.New(web.MustParse(nil)), logger, dial, serverRef, bindDN)
+	return NewLogin(store, testCipher(t), client, web.New(web.MustParse(nil)), logger, serverRef, bindDN)
 }
 
 func TestLoginFormRenders(t *testing.T) {
 	store := testStore(t, 30*time.Minute, 8*time.Hour)
-	h := newLoginHandler(t, store, nil, ldapx.DialOptions{}, "ldap://replica-1", "cn=admin,dc=example,dc=com")
+	h := newLoginHandler(t, store, nil, "ldap://replica-1", "cn=admin,dc=example,dc=com")
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/login?next=%2Fsearch", nil)
 	h.ServeHTTP(rr, req)
@@ -58,7 +57,7 @@ func TestSanitizeNext(t *testing.T) {
 
 func TestLoginSubmitRequiresFields(t *testing.T) {
 	store := testStore(t, 30*time.Minute, 8*time.Hour)
-	h := newLoginHandler(t, store, nil, ldapx.DialOptions{}, "ldap://replica-1", "")
+	h := newLoginHandler(t, store, nil, "ldap://replica-1", "")
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/login",
 		strings.NewReader("bind_dn=&password="))
@@ -90,16 +89,15 @@ func TestLoginSubmitIntegration(t *testing.T) {
 	}
 	defer inst.Stop()
 
-	client, err := ldapx.New(ctx, inst.Config(), nil)
+	cfg := inst.Config()
+	client, err := ldapx.New(ctx, cfg, nil)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
 	defer client.Close()
-	cfg := inst.Config()
-	dial := ldapx.DialOptions{URL: cfg.LDAP.URL, TLS: cfg.LDAP.TLS, Logger: nil}
 
 	store := testStore(t, 30*time.Minute, 8*time.Hour)
-	h := newLoginHandler(t, store, client, dial, cfg.LDAP.URL, cfg.LDAP.BindDN)
+	h := newLoginHandler(t, store, client, cfg.LDAP.URL, cfg.LDAP.BindDN)
 
 	// Wrong password: error page, no cookie, no session created (AE6).
 	rr := httptest.NewRecorder()
@@ -161,8 +159,8 @@ func TestLoginSubmitIntegration(t *testing.T) {
 
 func TestLoginReplacesExistingSession(t *testing.T) {
 	store := testStore(t, 30*time.Minute, 8*time.Hour)
-	h := newLoginHandler(t, store, nil, ldapx.DialOptions{}, "ldap://replica-1", "")
-	h.verify = func(context.Context, ldapx.DialOptions, string, string) error { return nil }
+	h := newLoginHandler(t, store, nil, "ldap://replica-1", "")
+	h.verify = func(context.Context, string, string) error { return nil }
 	oldID, err := session.NewID()
 	if err != nil {
 		t.Fatal(err)

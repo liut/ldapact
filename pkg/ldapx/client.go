@@ -15,7 +15,7 @@ import (
 // with the request credential from the context. The subschema cache loads
 // lazily on the first authenticated operation.
 type Client struct {
-	pool     *Pool
+	pool     *Replicas
 	autoPool *Pool
 	schema   *Schema
 	mu       sync.RWMutex
@@ -29,8 +29,12 @@ type Client struct {
 // lazily on the first authenticated operation (U5); credential validation
 // happens at login instead of startup.
 func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*Client, error) {
-	dialOpts := DialOptions{URL: cfg.LDAP.URL, TLS: cfg.LDAP.TLS, Logger: logger}
-	pool, err := NewPool(ctx, PoolOptions{
+	urls := cfg.LDAP.Servers
+	if len(urls) == 0 {
+		urls = []string{cfg.LDAP.URL}
+	}
+	dialOpts := DialOptions{TLS: cfg.LDAP.TLS, Logger: logger}
+	pool, err := NewReplicas(ctx, urls, PoolOptions{
 		Size:           cfg.LDAP.PoolSize,
 		Dial:           dialOpts,
 		HealthInterval: 30 * time.Second,
@@ -45,11 +49,13 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*Client,
 		filter: cfg.LDAP.TreeFilter,
 	}
 	if cfg.LDAP.AutoNumberDN != "" {
+		autoDial := dialOpts
+		autoDial.URL = urls[0]
 		ap, err := NewPool(ctx, PoolOptions{
 			Size:           2,
 			BindDN:         cfg.LDAP.AutoNumberDN,
 			BindPassword:   cfg.AutoNumberPassword,
-			Dial:           dialOpts,
+			Dial:           autoDial,
 			HealthInterval: 30 * time.Second,
 		})
 		if err != nil {
@@ -76,3 +82,9 @@ func (c *Client) BaseDN() string { return c.baseDN }
 
 // TreeFilter returns the configured tree browse filter (R2).
 func (c *Client) TreeFilter() string { return c.filter }
+
+// VerifyBind checks a credential against any available replica (R6/R11):
+// dial + bind + close per replica, failing over on network errors only.
+func (c *Client) VerifyBind(ctx context.Context, dn, password string) error {
+	return c.pool.VerifyBind(ctx, dn, password)
+}

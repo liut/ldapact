@@ -182,3 +182,60 @@ func TestIntegrationPerRequestBind(t *testing.T) {
 		t.Fatalf("admin modify after user bind on same pool: %v", err)
 	}
 }
+
+// TestIntegrationReplicaFailover is AE4: two directory replicas with the
+// same identity; when the first replica goes down, operations and login
+// verification fail over to the second.
+func TestIntegrationReplicaFailover(t *testing.T) {
+	ctx := context.Background()
+	instA := testInstance(t, ctx)
+	instB := testInstance(t, ctx)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	// The two instances are independent directories with the same admin
+	// identity; seed the target entry on both so the failing-over request
+	// finds it whichever replica serves.
+	dn := "ou=replica-test,dc=example,dc=com"
+	for _, inst := range []*testldap.Instance{instA, instB} {
+		c, err := New(ctx, inst.Config(), logger)
+		if err != nil {
+			t.Fatalf("seed client: %v", err)
+		}
+		seedCtx := WithCredential(ctx, BindCredential{DN: inst.AdminDN, Password: inst.AdminPassword})
+		if err := c.Add(seedCtx, dn, map[string][]string{
+			"objectClass": {"top", "organizationalUnit"}, "ou": {"replica-test"},
+		}); err != nil {
+			c.Close()
+			t.Fatalf("seed %s: %v", inst.URL, err)
+		}
+		c.Close()
+	}
+
+	cfg := instA.Config()
+	cfg.LDAP.URL = ""
+	cfg.LDAP.Servers = []string{instA.URL, instB.URL}
+	client, err := New(ctx, cfg, logger)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer client.Close()
+	adminCtx := WithCredential(ctx, BindCredential{DN: instA.AdminDN, Password: instA.AdminPassword})
+
+	// Login verification works against the live replica set.
+	if err := client.VerifyBind(ctx, instA.AdminDN, instA.AdminPassword); err != nil {
+		t.Fatalf("VerifyBind with both replicas up: %v", err)
+	}
+
+	// Replica A goes down: writes and login verification must fail over to
+	// replica B (AE4).
+	instA.Stop()
+	if err := client.VerifyBind(ctx, instB.AdminDN, instB.AdminPassword); err != nil {
+		t.Fatalf("VerifyBind after replica A down: %v", err)
+	}
+	if err := client.Modify(adminCtx, dn, []ldap.Change{{
+		Operation:    ldap.ReplaceAttribute,
+		Modification: ldap.PartialAttribute{Type: "description", Vals: []string{"failover-ok"}},
+	}}); err != nil {
+		t.Fatalf("Modify after replica A down: %v", err)
+	}
+}

@@ -71,7 +71,12 @@ func pagingClient(t *testing.T) *Client {
 // and search logic without a real schema round-trip (the lazy load is tested
 // separately against the integration backend).
 func schemaLoadedClient(p *Pool, baseDN string) *Client {
-	return &Client{pool: p, baseDN: baseDN, schema: NewSchema()}
+	return &Client{pool: singleReplica(p), baseDN: baseDN, schema: NewSchema()}
+}
+
+// singleReplica wraps one pool in a one-entry replica layer for unit tests.
+func singleReplica(p *Pool) *Replicas {
+	return &Replicas{pools: []*Pool{p}, urls: []string{"ldap://test.invalid:389"}}
 }
 
 func TestPageFirstPage(t *testing.T) {
@@ -232,7 +237,7 @@ func TestSearchWrapsLDAPError(t *testing.T) {
 }
 
 func TestSearchAutoWithoutPool(t *testing.T) {
-	c := &Client{pool: newTestPool()}
+	c := &Client{pool: singleReplica(newTestPool())}
 	req := ldap.NewSearchRequest("", ldap.ScopeBaseObject, ldap.NeverDerefAliases, 0, 0, false, "(objectClass=*)", nil, nil)
 	if _, err := c.SearchAuto(context.Background(), req); !errors.Is(err, ErrPoolClosed) {
 		t.Fatalf("want ErrPoolClosed, got %v", err)
