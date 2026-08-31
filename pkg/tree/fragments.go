@@ -11,6 +11,7 @@ import (
 	"strconv"
 
 	"github.com/go-ldap/ldap/v3"
+	"github.com/liut/ldapact/pkg/authn"
 	"github.com/liut/ldapact/pkg/ldapx"
 	"github.com/liut/ldapact/pkg/web"
 )
@@ -107,6 +108,10 @@ func (t *Tree) Children(w http.ResponseWriter, r *http.Request) {
 		PageSize: t.pageSize,
 	}, page)
 	if err != nil {
+		if authn.IsInvalidCredentials(err) {
+			authn.InvalidCredentialsRedirect(w, r)
+			return
+		}
 		t.renderFragment(w, ChildrenData{
 			ID:       containerID,
 			ParentDN: dn,

@@ -209,6 +209,18 @@ func isNotFound(err error) bool {
 	return false
 }
 
+// handleInvalidCredentials redirects to login when an LDAP operation fails
+// with invalidCredentials (R8/AE5): the stored bind credential no longer
+// works, so the session is invalidated and the user must re-login. Returns
+// true when the response is already written.
+func handleInvalidCredentials(w http.ResponseWriter, r *http.Request, err error) bool {
+	if authn.IsInvalidCredentials(err) {
+		authn.InvalidCredentialsRedirect(w, r)
+		return true
+	}
+	return false
+}
+
 // escapeRDNValue escapes an RDN value for use in a DN (RFC 4514 subset).
 func escapeRDNValue(v string) string {
 	var sb strings.Builder

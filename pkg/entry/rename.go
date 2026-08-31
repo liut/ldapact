@@ -70,6 +70,9 @@ func (h *Handler) RenameSubmit(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := h.client.ModifyDN(r.Context(), dn, newRDN, deleteOld, newSuperior); err != nil {
+		if handleInvalidCredentials(w, r, err) {
+			return
+		}
 		h.renderPage(w, "Rename entry — ldapact", "rename-form-content", RenameFormData{
 			DN: dn, ParentDN: parentDN(dn), NewRDN: newRDN, NewSuperior: newSuperior, DeleteOldRDN: deleteOld,
 			Crumbs: tree.Breadcrumbs(dn, h.client.BaseDN(), 5),

@@ -228,6 +228,9 @@ func (h *Handler) EditSubmit(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if err := h.client.Modify(r.Context(), dn, changes); err != nil {
+			if handleInvalidCredentials(w, r, err) {
+				return
+			}
 			h.logger.Warn("entry edit rejected", "event", "ldap.error", "dn", dn, "error", err)
 			h.renderEditForm(w, r, e, fields, tmpl, map[string]string{"_form": editError(err)})
 			return

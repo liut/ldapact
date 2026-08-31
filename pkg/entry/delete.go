@@ -55,6 +55,9 @@ func (h *Handler) DeleteSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.client.Delete(r.Context(), dn); err != nil {
+		if handleInvalidCredentials(w, r, err) {
+			return
+		}
 		h.dnError(w, r, err)
 		return
 	}

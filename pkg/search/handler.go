@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/go-ldap/ldap/v3"
+	"github.com/liut/ldapact/pkg/authn"
 	"github.com/liut/ldapact/pkg/ldapx"
 	"github.com/liut/ldapact/pkg/web"
 )
@@ -182,6 +183,10 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := h.client.Page(r.Context(), opts, page)
 	if err != nil {
+		if authn.IsInvalidCredentials(err) {
+			authn.InvalidCredentialsRedirect(w, r)
+			return
+		}
 		data.Error = "Search failed: " + err.Error()
 		h.renderPage(w, data)
 		return

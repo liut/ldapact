@@ -153,6 +153,9 @@ func (h *Handler) CreateSubmit(w http.ResponseWriter, r *http.Request) {
 		h.client.Schema().CanonicalAttributes(attrs)
 	}
 	if err := h.client.Add(r.Context(), dn, attrs); err != nil {
+		if handleInvalidCredentials(w, r, err) {
+			return
+		}
 		h.logger.Warn("create failed", "event", "ldap.error", "dn", dn, "error", err)
 		errorsMap["_form"] = friendlyCreateError(err)
 		h.renderCreateErrors(w, r, tmpl, container, values, errorsMap)

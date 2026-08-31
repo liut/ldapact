@@ -1,15 +1,16 @@
 package main
 
 import (
-	"html"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/liut/ldapact/internal/app"
+	"github.com/liut/ldapact/pkg/session"
 )
 
 func TestNewHandlerHealthz(t *testing.T) {
@@ -85,15 +86,35 @@ func TestNewHandlerStaticAssets(t *testing.T) {
 	}
 }
 
-func TestNewHandlerLoginLanding(t *testing.T) {
+func TestNewHandlerLoginGate(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	store := session.NewMemoryStore(30*time.Minute, 8*time.Hour)
+	defer store.Close()
+	cipher, err := session.NewCredentialCipher("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deps := app.Deps{Logger: logger, Store: store, Cipher: cipher}
+
+	// The login gate redirects unauthenticated requests to /login.
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/login?next=%2Fprotected", nil)
-	app.NewHandler(app.Deps{Logger: logger}).ServeHTTP(rr, req)
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	app.NewHandler(deps).ServeHTTP(rr, req)
+	if rr.Code != http.StatusFound {
+		t.Fatalf("gate code = %d, want 302", rr.Code)
+	}
+	if !strings.HasPrefix(rr.Header().Get("Location"), "/login?next=") {
+		t.Errorf("gate Location = %q", rr.Header().Get("Location"))
+	}
+
+	// The login page renders with the next target preserved.
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/login?next=%2Fprotected", nil)
+	app.NewHandler(deps).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("login code = %d", rr.Code)
 	}
-	if !strings.Contains(rr.Body.String(), html.EscapeString("/protected")) {
-		t.Errorf("login page missing next link: %s", rr.Body.String())
+	if !strings.Contains(rr.Body.String(), `value="/protected"`) {
+		t.Errorf("login page missing next target: %s", rr.Body.String())
 	}
 }

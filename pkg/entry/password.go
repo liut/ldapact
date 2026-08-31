@@ -89,6 +89,9 @@ func (h *Handler) PasswordChange(w http.ResponseWriter, r *http.Request) {
 		Modification: ldap.PartialAttribute{Type: "userPassword", Vals: []string{hashed}},
 	}}
 	if err := h.client.Modify(r.Context(), dn, changes); err != nil {
+		if handleInvalidCredentials(w, r, err) {
+			return
+		}
 		// ppolicy overlays surface constraint violations as result codes
 		// (e.g. 19 constraintViolation, 53 unwillingToPerform).
 		h.logger.Warn("password change rejected", "event", "ldap.error", "dn", dn, "error", err)
@@ -178,6 +181,9 @@ func passwordChangeError(err error) string {
 }
 
 func (h *Handler) dnError(w http.ResponseWriter, r *http.Request, err error) {
+	if handleInvalidCredentials(w, r, err) {
+		return
+	}
 	if isNotFound(err) {
 		http.NotFound(w, r)
 		return

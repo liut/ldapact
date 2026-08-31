@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/liut/ldapact/pkg/authn"
 	"github.com/liut/ldapact/pkg/web"
 )
 
@@ -143,6 +144,10 @@ func (h *ImportHandler) Submit(w http.ResponseWriter, r *http.Request) {
 			attrs[a.Name] = a.Values
 		}
 		if err := h.adder.Add(r.Context(), entry.DN, attrs); err != nil {
+			if authn.IsInvalidCredentials(err) {
+				authn.InvalidCredentialsRedirect(w, r)
+				return
+			}
 			result.Failures++
 			reason := "LDAP rejected the entry: " + err.Error()
 			if hint := remediationHint(err); hint != "" {

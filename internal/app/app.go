@@ -5,7 +5,6 @@ package app
 
 import (
 	"fmt"
-	"html"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -30,7 +29,17 @@ type Deps struct {
 	Logger *slog.Logger
 	LDAP   *ldapx.Client
 	Store  session.Store
+	Cipher *session.CredentialCipher
 	Cfg    *config.Config
+}
+
+// ldapTLS returns the TLS posture for the login dial, tolerating a nil
+// config (health-only handler chains).
+func ldapTLS(cfg *config.Config) config.TLSConfig {
+	if cfg == nil {
+		return config.TLSConfig{}
+	}
+	return cfg.LDAP.TLS
 }
 
 // NewHandler assembles the request chain (recover -> request id -> security
@@ -44,6 +53,7 @@ func NewHandler(d Deps) http.Handler {
 	var importHandler *ldif.ImportHandler
 	var exportHandler *ldif.ExportHandler
 	var searchHandler *search.Handler
+	var loginHandler *authn.LoginHandler
 	if d.LDAP != nil {
 		treeBrowser = tree.NewTree(d.LDAP, renderer, d.Logger)
 		schemaBrowser = tree.NewSchemaBrowser(d.LDAP, renderer)
@@ -56,6 +66,21 @@ func NewHandler(d Deps) http.Handler {
 		importHandler = ldif.NewImportHandler(d.LDAP, renderer, d.Logger)
 		exportHandler = ldif.NewExportHandler(d.LDAP, d.Logger)
 		searchHandler = search.New(d.LDAP, renderer)
+	}
+	if d.Store != nil && d.Cipher != nil {
+		serverRef := ""
+		bindDN := ""
+		if d.Cfg != nil {
+			if len(d.Cfg.LDAP.Servers) > 0 {
+				serverRef = d.Cfg.LDAP.Servers[0]
+			} else {
+				serverRef = d.Cfg.LDAP.URL
+			}
+			bindDN = d.Cfg.LDAP.BindDN
+		}
+		loginHandler = authn.NewLogin(d.Store, d.Cipher, d.LDAP, renderer, d.Logger,
+			ldapx.DialOptions{URL: serverRef, TLS: ldapTLS(d.Cfg), Logger: d.Logger},
+			serverRef, bindDN)
 	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -72,16 +97,11 @@ func NewHandler(d Deps) http.Handler {
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		}
 	})
-	// Minimal landing for the redirect_to_login expired-session action (AE7).
-	// v1 has no credential entry (AE1 auto-bind); the page offers to continue.
-	mux.HandleFunc("GET /login", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		next := r.URL.Query().Get("next")
-		if next == "" {
-			next = "/"
-		}
-		fmt.Fprintf(w, `<!doctype html><html><head><title>Session expired — ldapact</title></head><body><main role="main"><h1>Session expired</h1><p>Your session expired. <a href="%s">Continue to ldapact</a>.</p></main></body></html>`, html.EscapeString(next))
-	})
+	if loginHandler != nil {
+		mux.Handle("GET /login", loginHandler)
+		mux.Handle("POST /login", loginHandler)
+		mux.HandleFunc("POST /logout", loginHandler.Logout)
+	}
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(ldapact.Assets())))
 	if treeBrowser != nil {
 		// Go's ServeMux only allows multi-segment wildcards ({dn...}) as the
@@ -118,12 +138,7 @@ func NewHandler(d Deps) http.Handler {
 	var h http.Handler = mux
 	h = ratelimit.New(60, 120).Handler(h)
 	h = authn.CSRF(d.Logger)(h)
-	sessOpts := authn.MiddlewareOptions{Store: d.Store, Logger: d.Logger}
-	if d.Cfg != nil {
-		sessOpts.ExpiredAction = d.Cfg.Session.ExpiredAction
-		sessOpts.Profile = d.Cfg.LDAP.BindDN
-	}
-	h = authn.Middleware(sessOpts)(h)
+	h = authn.Middleware(authn.MiddlewareOptions{Store: d.Store, Cipher: d.Cipher, Logger: d.Logger})(h)
 	h = secheaders.Middleware(h)
 	h = logging.RequestID(h)
 	h = logging.Recover(d.Logger)(h)
