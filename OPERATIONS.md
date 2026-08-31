@@ -66,6 +66,36 @@ certificates and warns at < 30 days (`event=ldap.cert_expiring`). Rotate the
 directory server certificate, then restart ldapact. Hostname verification uses
 the SAN from the `LDAPADM_URL` host.
 
+## LDAP server troubleshooting
+
+If ldapact starts silently — no `LDAP bound` and no error — the directory
+server may have wedged: it still accepts TCP connections but never processes
+them (sessions hang before the first log line). Check the directory's own
+log first. A MacPorts slapd configured with `loglevel conns stats` writes to
+syslog LOG_LOCAL4, i.e. the macOS unified log:
+
+```sh
+log show --predicate 'process == "slapd"' --last 1h
+```
+
+Quick confirmation of a wedged server: `netstat -an | grep .389` shows
+ESTABLISHED connections with a stuck Recv-Q, and even
+`ldapsearch -x -H ldap://127.0.0.1:389 -b '' -s base` hangs.
+
+Restart a wedged slapd with SIGKILL (SIGTERM is ineffective once it is
+stuck), then let launchd start a fresh instance:
+
+```sh
+ps -eo pid,lstart,command | grep libexec/slapd   # note the old PID
+sudo kill -9 <old-slapd-pid>
+sudo launchctl kickstart -k system/org.macports.slapd
+```
+
+The MacPorts daemondo job runs with `--pid=none`, so `kickstart -k` only
+restarts daemondo itself — kill the old slapd first or the fresh instance
+fails to bind :389. Note that slapd's `logfile` directive only captures `-d`
+debug messages, not `loglevel` output; `loglevel` always goes to syslog.
+
 ## Cutover playbook (phpLDAPadmin → ldapact)
 
 1. **Parallel run**: deploy ldapact against the same directory with a read-only

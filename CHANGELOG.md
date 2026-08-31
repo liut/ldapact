@@ -3,6 +3,13 @@
 All notable changes to ldapact v1 are tracked here, one entry per implementation
 unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
 
+## LDAP server troubleshooting docs (2026-08-31)
+
+- OPERATIONS.md gains a directory-server troubleshooting section: diagnosing
+  a wedged slapd via the macOS unified log (`log show --predicate
+  'process == "slapd"'`) and restarting it (SIGKILL + `launchctl kickstart`),
+  including the MacPorts daemondo `--pid=none` trap.
+
 ## Envconfig unified prefix + config reference (2026-08-31)
 
 - envconfig now parses with the `LDAPADM` prefix and short `envconfig` tags;
