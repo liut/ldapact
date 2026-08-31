@@ -42,11 +42,13 @@ func TestLoginFormRenders(t *testing.T) {
 
 func TestSanitizeNext(t *testing.T) {
 	cases := map[string]string{
-		"":                    "/",
-		"/search?q=(uid=x)":   "/search?q=(uid=x)",
-		"https://evil.com":    "/",
-		"//evil.com":          "/",
-		"javascript:alert(1)": "/",
+		"":                     "/",
+		"/search?q=(uid=x)":    "/search?q=(uid=x)",
+		"https://evil.com":     "/",
+		"//evil.com":           "/",
+		"javascript:alert(1)":  "/",
+		`/\evil.com`:           "/",
+		"/path\r\nLocation: x": "/",
 	}
 	for in, want := range cases {
 		if got := sanitizeNext(in); got != want {

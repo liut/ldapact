@@ -170,12 +170,16 @@ func (h *LoginHandler) renderError(w http.ResponseWriter, event string, err erro
 }
 
 // sanitizeNext restricts the post-login redirect to a same-site path (no
-// scheme, no protocol-relative URL).
+// scheme, no protocol-relative URL, no backslash/control tricks that
+// browsers might reinterpret as an authority).
 func sanitizeNext(next string) string {
 	if next == "" {
 		return "/"
 	}
 	if !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") {
+		return "/"
+	}
+	if strings.ContainsAny(next, "\\\r\n") {
 		return "/"
 	}
 	return next

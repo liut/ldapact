@@ -189,6 +189,12 @@ func (s *RedisStore) persist(id string, v *Value) error {
 		return fmt.Errorf("session: redis encode: %w", err)
 	}
 	ttl := minDuration(v.ExpiresAt.Sub(s.now()), v.AbsoluteExpiresAt.Sub(s.now()))
+	// Clamp so a boundary-zero remaining window (now exactly at a deadline)
+	// can never be written as "no expiry": the next read re-checks the
+	// in-value absolute timestamp and lazily deletes.
+	if ttl <= 0 {
+		ttl = time.Second
+	}
 	if err := s.rdb.Set(context.Background(), s.key(id), raw, ttl).Err(); err != nil {
 		return fmt.Errorf("session: redis persist %s: %w", id, err)
 	}
