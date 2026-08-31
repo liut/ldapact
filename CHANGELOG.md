@@ -3,6 +3,19 @@
 All notable changes to ldapact v1 are tracked here, one entry per implementation
 unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
 
+## Dependency security bumps (2026-08-31)
+
+- `govulncheck` in CI flagged the testcontainers tar path (moby/go-archive).
+  Bumped `github.com/moby/go-archive` v0.2.0 → v0.3.3 and
+  `golang.org/x/crypto` v0.54.0 → v0.55.0; `make lint` is green again.
+
+## Lint tool management (2026-08-31)
+
+- `make lint`'s tool prerequisites (staticcheck, govulncheck) are installed
+  via a new `make tools` target with overridable versions; CI calls it
+  instead of repeating `go install` in each workflow. `make lint` now hints
+  at `make tools` when staticcheck is missing.
+
 ## CI workflow consolidation (2026-08-31)
 
 - Merged the lint and test workflows into a single `ci.yml` with parallel

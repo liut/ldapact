@@ -21,11 +21,8 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install staticcheck
-        run: go install honnef.co/go/tools/cmd/staticcheck@latest
-
-      - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: Install lint tools
+        run: make tools
 
       - name: Run lint
         run: make lint
