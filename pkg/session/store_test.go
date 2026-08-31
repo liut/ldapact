@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func newTestStore(t *testing.T, idle, absolute time.Duration) *Store {
+func newTestStore(t *testing.T, idle, absolute time.Duration) *BboltStore {
 	t.Helper()
 	s, err := NewStore(filepath.Join(t.TempDir(), "sessions.db"), idle, absolute)
 	if err != nil {
@@ -23,12 +23,18 @@ func newTestStore(t *testing.T, idle, absolute time.Duration) *Store {
 func TestCreateGetDelete(t *testing.T) {
 	s := newTestStore(t, 30*time.Minute, 8*time.Hour)
 	id := "sess-1"
-	v, err := s.Create(id, "cn=admin,dc=example,dc=com")
+	v, err := s.Create(id, "cn=admin,dc=example,dc=com", "ldap://replica-1", []byte("encrypted"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if v.ProfileRef != "cn=admin,dc=example,dc=com" {
 		t.Errorf("profile = %q", v.ProfileRef)
+	}
+	if v.ServerRef != "ldap://replica-1" {
+		t.Errorf("server_ref = %q", v.ServerRef)
+	}
+	if string(v.Credential) != "encrypted" {
+		t.Errorf("credential = %q", v.Credential)
 	}
 	got, err := s.Get(id)
 	if err != nil {
@@ -36,6 +42,9 @@ func TestCreateGetDelete(t *testing.T) {
 	}
 	if !got.LastSeenAt.After(v.LastSeenAt) {
 		t.Error("Get should refresh LastSeenAt")
+	}
+	if got.ServerRef != "ldap://replica-1" || string(got.Credential) != "encrypted" {
+		t.Error("server/credential fields lost in Get round-trip")
 	}
 	if err := s.Delete(id); err != nil {
 		t.Fatal(err)
@@ -50,7 +59,7 @@ func TestIdleExpiry(t *testing.T) {
 	base := time.Now()
 	s.now = func() time.Time { return base }
 	id := "idle"
-	if _, err := s.Create(id, ""); err != nil {
+	if _, err := s.Create(id, "", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	// No access until 31 minutes after creation: expired.
@@ -65,7 +74,7 @@ func TestIdleExpiry(t *testing.T) {
 	// Access refreshes the idle window: a hit at 29 min keeps the session
 	// alive at 31 min, and only expires after another 30 idle minutes.
 	id2 := "refresh"
-	if _, err := s.Create(id2, ""); err != nil {
+	if _, err := s.Create(id2, "", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	s.now = func() time.Time { return base.Add(29 * time.Minute) }
@@ -87,7 +96,7 @@ func TestAbsoluteExpiry(t *testing.T) {
 	base := time.Now()
 	s.now = func() time.Time { return base }
 	id := "abs"
-	if _, err := s.Create(id, ""); err != nil {
+	if _, err := s.Create(id, "", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	// Recent activity, but past the absolute horizon.
@@ -100,7 +109,7 @@ func TestAbsoluteExpiry(t *testing.T) {
 func TestRotate(t *testing.T) {
 	s := newTestStore(t, 30*time.Minute, 8*time.Hour)
 	oldID := "old"
-	if _, err := s.Create(oldID, "p"); err != nil {
+	if _, err := s.Create(oldID, "p", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	v, err := s.Rotate(oldID, "new")
@@ -127,7 +136,7 @@ func TestRotateMissingOld(t *testing.T) {
 
 func TestDataRoundTrip(t *testing.T) {
 	s := newTestStore(t, 30*time.Minute, 8*time.Hour)
-	if _, err := s.Create("d", ""); err != nil {
+	if _, err := s.Create("d", "", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetData("d", "form:abc", `{"uid":"alice"}`); err != nil {
@@ -143,11 +152,11 @@ func TestSweep(t *testing.T) {
 	s := newTestStore(t, 30*time.Minute, 8*time.Hour)
 	base := time.Now()
 	s.now = func() time.Time { return base }
-	if _, err := s.Create("old", ""); err != nil {
+	if _, err := s.Create("old", "", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	s.now = func() time.Time { return base.Add(30 * time.Minute) }
-	if _, err := s.Create("fresh", ""); err != nil {
+	if _, err := s.Create("fresh", "", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	s.now = func() time.Time { return base.Add(31 * time.Minute) }
@@ -222,5 +231,35 @@ func TestNewID(t *testing.T) {
 	}
 	if len(a) != base64.RawURLEncoding.EncodedLen(IDBytes) {
 		t.Errorf("id length = %d", len(a))
+	}
+}
+
+// TestBboltPersistenceAcrossReopen is AE7 for the bbolt backend: closing and
+// reopening the same database file preserves sessions (and their credential
+// fields).
+func TestBboltPersistenceAcrossReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sessions.db")
+	s, err := NewStore(path, 30*time.Minute, 8*time.Hour)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	if _, err := s.Create("persist", "p", "srv", []byte("cred")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := NewStore(path, 30*time.Minute, 8*time.Hour)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer reopened.Close()
+	v, err := reopened.Get("persist")
+	if err != nil {
+		t.Fatalf("Get after reopen: %v", err)
+	}
+	if v.ProfileRef != "p" || v.ServerRef != "srv" || string(v.Credential) != "cred" {
+		t.Errorf("persisted session lost fields: %+v", v)
 	}
 }

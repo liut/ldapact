@@ -1,6 +1,7 @@
-// Package session implements the R13 server-side session store backed by
-// bbolt (KTD 7/8): opaque random IDs in a __Host- cookie, idle + absolute
-// timeouts, rotation after state changes, and a periodic sweeper.
+// Package session implements the R13 server-side session stores (KTD 7/8):
+// opaque random IDs in a __Host- cookie, idle + absolute timeouts, rotation
+// after state changes, and a periodic sweeper. The bbolt and memory backends
+// live here; the Redis backend (default, multi-instance) lives in redis.go.
 package session
 
 import (
@@ -31,26 +32,76 @@ const (
 
 // Value is the server-side session record.
 type Value struct {
-	CreatedAt         time.Time         `json:"created_at"`
-	LastSeenAt        time.Time         `json:"last_seen_at"`
-	ExpiresAt         time.Time         `json:"expires_at"`
-	AbsoluteExpiresAt time.Time         `json:"absolute_expires_at"`
-	ProfileRef        string            `json:"profile_ref"`
-	Data              map[string]string `json:"data,omitempty"`
+	CreatedAt         time.Time `json:"created_at"`
+	LastSeenAt        time.Time `json:"last_seen_at"`
+	ExpiresAt         time.Time `json:"expires_at"`
+	AbsoluteExpiresAt time.Time `json:"absolute_expires_at"`
+	ProfileRef        string    `json:"profile_ref"`
+	// ServerRef names the LDAP replica the credential is bound to (R2).
+	ServerRef string `json:"server_ref,omitempty"`
+	// Credential carries the encrypted bind credential for this session
+	// (opaque bytes; encryption happens at the session layer, U4).
+	Credential []byte            `json:"credential,omitempty"`
+	Data       map[string]string `json:"data,omitempty"`
 }
 
-// Store is the bbolt-backed session store.
-type Store struct {
+// Store is the session store abstraction (R1). Backends: bbolt (default
+// compatibility), memory (single instance, cleared on restart), Redis
+// (multi-instance shared).
+type Store interface {
+	// Create stamps a new session record and stores it under id.
+	Create(id, profileRef, serverRef string, credential []byte) (*Value, error)
+	// Get returns the session, refreshing its idle timeout. Expired sessions
+	// are deleted and reported as ErrSessionExpired.
+	Get(id string) (*Value, error)
+	// Rotate migrates the session to a new ID, invalidating the old one.
+	Rotate(oldID, newID string) (*Value, error)
+	// Delete removes a session.
+	Delete(id string) error
+	// Sweep deletes all expired sessions and reports how many were removed.
+	Sweep() (int, error)
+	// Close releases backend resources.
+	Close() error
+}
+
+// BboltStore is the bbolt-backed session store.
+type BboltStore struct {
 	db       *bbolt.DB
 	now      func() time.Time
 	idle     time.Duration
 	absolute time.Duration
 }
 
+// newValue stamps a fresh session record with the shared timeout semantics.
+func newValue(now time.Time, profileRef, serverRef string, credential []byte, idle, absolute time.Duration) *Value {
+	return &Value{
+		CreatedAt:         now,
+		LastSeenAt:        now,
+		ExpiresAt:         now.Add(idle),
+		AbsoluteExpiresAt: now.Add(absolute),
+		ProfileRef:        profileRef,
+		ServerRef:         serverRef,
+		Credential:        credential,
+		Data:              make(map[string]string),
+	}
+}
+
+// expired reports whether v has exceeded either its idle or absolute
+// deadline at now.
+func expired(v *Value, now time.Time) bool {
+	return now.After(v.AbsoluteExpiresAt) || now.After(v.ExpiresAt)
+}
+
+// refresh advances the idle deadline to now + idle.
+func refresh(v *Value, now time.Time, idle time.Duration) {
+	v.LastSeenAt = now
+	v.ExpiresAt = now.Add(idle)
+}
+
 // NewStore opens (or creates) the sessions database, enforcing mode 0600 and
 // creating the sessions bucket. startup fails if an existing file has the
 // wrong mode (KTD 7).
-func NewStore(path string, idleTimeout, absoluteTimeout time.Duration) (*Store, error) {
+func NewStore(path string, idleTimeout, absoluteTimeout time.Duration) (*BboltStore, error) {
 	if err := ensureParentDir(path); err != nil {
 		return nil, err
 	}
@@ -68,7 +119,7 @@ func NewStore(path string, idleTimeout, absoluteTimeout time.Duration) (*Store, 
 		db.Close()
 		return nil, fmt.Errorf("session: create bucket: %w", err)
 	}
-	return &Store{
+	return &BboltStore{
 		db:       db,
 		now:      time.Now,
 		idle:     idleTimeout,
@@ -117,16 +168,8 @@ func checkFileMode(path string) error {
 }
 
 // Create inserts a new session and returns its value.
-func (s *Store) Create(id, profileRef string) (*Value, error) {
-	now := s.now()
-	v := &Value{
-		CreatedAt:         now,
-		LastSeenAt:        now,
-		ExpiresAt:         now.Add(s.idle),
-		AbsoluteExpiresAt: now.Add(s.absolute),
-		ProfileRef:        profileRef,
-		Data:              make(map[string]string),
-	}
+func (s *BboltStore) Create(id, profileRef, serverRef string, credential []byte) (*Value, error) {
+	v := newValue(s.now(), profileRef, serverRef, credential, s.idle, s.absolute)
 	raw, err := json.Marshal(v)
 	if err != nil {
 		return nil, fmt.Errorf("session: encode: %w", err)
@@ -142,7 +185,7 @@ func (s *Store) Create(id, profileRef string) (*Value, error) {
 
 // Get returns the session, refreshing its idle timeout. Expired sessions are
 // deleted and reported as ErrSessionExpired (AE7).
-func (s *Store) Get(id string) (*Value, error) {
+func (s *BboltStore) Get(id string) (*Value, error) {
 	var raw []byte
 	err := s.db.View(func(tx *bbolt.Tx) error {
 		raw = tx.Bucket([]byte(BucketName)).Get([]byte(id))
@@ -159,12 +202,11 @@ func (s *Store) Get(id string) (*Value, error) {
 		return nil, fmt.Errorf("session: decode %s: %w", id, err)
 	}
 	now := s.now()
-	if now.After(v.AbsoluteExpiresAt) || now.After(v.ExpiresAt) {
+	if expired(&v, now) {
 		_ = s.Delete(id)
 		return nil, ErrSessionExpired
 	}
-	v.LastSeenAt = now
-	v.ExpiresAt = now.Add(s.idle)
+	refresh(&v, now, s.idle)
 	if err := s.put(id, &v); err != nil {
 		return nil, err
 	}
@@ -172,14 +214,14 @@ func (s *Store) Get(id string) (*Value, error) {
 }
 
 // Delete removes a session.
-func (s *Store) Delete(id string) error {
+func (s *BboltStore) Delete(id string) error {
 	return s.db.Update(func(tx *bbolt.Tx) error {
 		return tx.Bucket([]byte(BucketName)).Delete([]byte(id))
 	})
 }
 
 // GetData returns session form state (F2 multi-page wizard, U6).
-func (s *Store) GetData(id, key string) (string, bool) {
+func (s *BboltStore) GetData(id, key string) (string, bool) {
 	v, err := s.Get(id)
 	if err != nil {
 		return "", false
@@ -189,7 +231,7 @@ func (s *Store) GetData(id, key string) (string, bool) {
 }
 
 // SetData stores session form state.
-func (s *Store) SetData(id, key, val string) error {
+func (s *BboltStore) SetData(id, key, val string) error {
 	v, err := s.Get(id)
 	if err != nil {
 		return err
@@ -201,7 +243,7 @@ func (s *Store) SetData(id, key, val string) error {
 	return s.put(id, v)
 }
 
-func (s *Store) put(id string, v *Value) error {
+func (s *BboltStore) put(id string, v *Value) error {
 	raw, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Errorf("session: encode: %w", err)
@@ -212,16 +254,16 @@ func (s *Store) put(id string, v *Value) error {
 }
 
 // Close closes the underlying database.
-func (s *Store) Close() error {
+func (s *BboltStore) Close() error {
 	return s.db.Close()
 }
 
 // Path returns the database path (for diagnostics).
-func (s *Store) Path() string {
+func (s *BboltStore) Path() string {
 	return filepath.Clean(s.db.Path())
 }
 
 // SetNow replaces the store clock (testing seam for expiry/rotation tests).
-func (s *Store) SetNow(fn func() time.Time) {
+func (s *BboltStore) SetNow(fn func() time.Time) {
 	s.now = fn
 }

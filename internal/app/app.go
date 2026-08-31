@@ -29,7 +29,7 @@ import (
 type Deps struct {
 	Logger *slog.Logger
 	LDAP   *ldapx.Client
-	Store  *session.Store
+	Store  session.Store
 	Cfg    *config.Config
 }
 

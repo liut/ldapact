@@ -12,7 +12,7 @@ import (
 	"github.com/liut/ldapact/pkg/session"
 )
 
-func testStore(t *testing.T, idle, absolute time.Duration) *session.Store {
+func testStore(t *testing.T, idle, absolute time.Duration) *session.BboltStore {
 	t.Helper()
 	s, err := session.NewStore(filepath.Join(t.TempDir(), "sessions.db"), idle, absolute)
 	if err != nil {
@@ -22,7 +22,7 @@ func testStore(t *testing.T, idle, absolute time.Duration) *session.Store {
 	return s
 }
 
-func middlewareOpts(store *session.Store) MiddlewareOptions {
+func middlewareOpts(store session.Store) MiddlewareOptions {
 	return MiddlewareOptions{
 		Store:         store,
 		Logger:        testLogger(),

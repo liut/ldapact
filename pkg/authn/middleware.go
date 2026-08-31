@@ -33,7 +33,7 @@ func SessionFrom(ctx context.Context) *Session {
 
 // MiddlewareOptions wires the session middleware.
 type MiddlewareOptions struct {
-	Store         *session.Store
+	Store         session.Store
 	Logger        *slog.Logger
 	ExpiredAction string // config.ExpiredActionRetryBind | config.ExpiredActionRedirectLogin
 	Profile       string // bind DN used as profile_ref (R15 actor semantics)
@@ -122,7 +122,7 @@ func (opts MiddlewareOptions) newSession(w http.ResponseWriter) *Session {
 		opts.storeError(w, err)
 		return nil
 	}
-	v, err := opts.Store.Create(id, opts.Profile)
+	v, err := opts.Store.Create(id, opts.Profile, "", nil)
 	if err != nil {
 		opts.storeError(w, err)
 		return nil

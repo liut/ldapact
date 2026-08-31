@@ -40,7 +40,7 @@ type Handler struct {
 	render   *web.Renderer
 	logger   *slog.Logger
 	loader   *TemplateLoader
-	sessions *session.Store
+	sessions session.Store
 	cfg      *config.Config
 }
 
@@ -97,7 +97,7 @@ type ResultData struct {
 }
 
 // New builds the flow handler.
-func New(client EntryClient, renderer *web.Renderer, logger *slog.Logger, loader *TemplateLoader, sessions *session.Store, cfg *config.Config) *Handler {
+func New(client EntryClient, renderer *web.Renderer, logger *slog.Logger, loader *TemplateLoader, sessions session.Store, cfg *config.Config) *Handler {
 	return &Handler{client: client, render: renderer, logger: logger, loader: loader, sessions: sessions, cfg: cfg}
 }
 
