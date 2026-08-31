@@ -38,10 +38,12 @@ func run(args []string) int {
 	fs.SetOutput(os.Stderr)
 	var (
 		showVersion bool
+		showConfig  bool
 		healthcheck bool
 		healthURL   string
 	)
 	fs.BoolVar(&showVersion, "version", false, "print version and exit")
+	fs.BoolVar(&showConfig, "config-help", false, "print LDAPADM_* configuration reference and exit")
 	fs.BoolVar(&healthcheck, "healthcheck", false, "check /healthz and exit (container health probes)")
 	fs.StringVar(&healthURL, "health-url", "http://127.0.0.1:8389/healthz", "URL for -healthcheck")
 	if err := fs.Parse(args); err != nil {
@@ -49,6 +51,13 @@ func run(args []string) int {
 	}
 	if showVersion {
 		fmt.Printf("ldapact %s (commit %s)\n", version, commit)
+		return 0
+	}
+	if showConfig {
+		if err := config.Usage(os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "ldapact: config help: %v\n", err)
+			return 1
+		}
 		return 0
 	}
 	if healthcheck {

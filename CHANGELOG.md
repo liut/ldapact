@@ -3,6 +3,27 @@
 All notable changes to ldapact v1 are tracked here, one entry per implementation
 unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
 
+## Envconfig unified prefix + config reference (2026-08-31)
+
+- envconfig now parses with the `LDAPADM` prefix and short `envconfig` tags;
+  the documented `LDAPADM_*` names are unchanged. The flat envFields view is
+  kept (nested-struct parsing would produce `LDAPADM_LDAP_URL`-style names),
+  and defaults stay in `Validate()` as the single source of truth.
+- Unknown `LDAPADM_*` variables are ignored (the strict allowlist is gone);
+  envconfig's bare-name fallback is accepted: when `LDAPADM_URL` is absent a
+  bare `URL` variable would be read, so set the prefixed key to be explicit.
+- A set-but-empty variable is parsed as-is instead of treated as unset:
+  numeric/boolean fields fail at parse time naming the variable, string
+  fields fall through to validation.
+- The non-secret `LDAPADM_*` env-name constants moved to `config_test.go`
+  (test-only); runtime code no longer references them — the two secret
+  constants remain in `pkg/config` for the resolver chain.
+- `LDAPADM_PASSWORD_SCHEME` is normalized (trim + upper) at parse time via an
+  envconfig `Decoder`; the RFC 2307 write-allowlist check stays in
+  `Validate()`.
+- New `-config-help` flag prints the `LDAPADM_*` reference (key, type,
+  description) generated from the struct tags.
+
 ## Default listen port 8389 (2026-08-31)
 
 - Default `LDAPADM_LISTEN` moved from 8080 to 127.0.0.1:8389 (IANA-unassigned,

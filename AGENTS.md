@@ -18,7 +18,7 @@ custom creation templates keep working, and renders the UI with Go
 - `internal/app` — the only place routes are registered; HTTP middleware chain.
 - `internal/testldap` — integration-test LDAP backend harness (never touches a real LDAP service).
 - `pkg/authn` — session middleware + CSRF.
-- `pkg/config` — `LDAPADM_*` envconfig profile, strict allowlist, secret resolution.
+- `pkg/config` — `LDAPADM_*` envconfig profile, secret resolution.
 - `pkg/entry` — entry flows: detail, create (F2), edit, password (F3), delete (F5), rename (F6), photo.
 - `pkg/ldapx` — LDAP client, connection pool, paged search, schema parse/cache, CRUD.
 - `pkg/ldif` — LDIF parser/writer, streaming import/export (F4/F7).
@@ -57,8 +57,8 @@ parent `go.work` — build standalone. For a single package, use
 `go test -count=1 ./pkg/<pkg>/` (same for `go vet`).
 
 Local dev env: copy `.env.example` to your own file and source it; never edit
-or source the example directly. The production binary rejects `LDAPADM_TEST_*`
-variables (strict allowlist), so unset them before running the server.
+or source the example directly. Unset `LDAPADM_TEST_*` variables before
+running the server (unknown `LDAPADM_*` variables are ignored).
 
 ## Integration-test backends
 
@@ -114,8 +114,8 @@ parse failure at startup — don't weaken that.
 - All runtime config comes from `LDAPADM_*` env vars via envconfig; no config file.
 - Secrets (bind / auto-number password) resolve: env var → file (mode must be
   `0600`) → interactive TTY prompt. Never put secrets in config structs or logs.
-- The production binary fails startup on unknown or harness-only `LDAPADM_*`
-  variables (typo guard).
+- Unknown `LDAPADM_*` variables are ignored; a set-but-empty value is parsed
+  as-is (numeric/boolean fields fail at parse time naming the variable).
 
 ### Security invariants (do not weaken)
 

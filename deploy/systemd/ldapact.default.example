@@ -2,8 +2,10 @@
 #
 # Install this file as /etc/default/ldapact (referenced by ldapact.service
 # via EnvironmentFile) and edit values there — the unit file itself stays
-# untouched. Unknown LDAPADM_* variables fail startup; empty values are
-# treated as unset so defaults apply. Full reference: README "Configuration".
+# untouched. Unknown LDAPADM_* variables are ignored; leave optional
+# variables commented out rather than empty (an explicitly empty
+# numeric/boolean value fails startup). Full reference: README
+# "Configuration".
 
 LDAPADM_LISTEN=127.0.0.1:8389
 LDAPADM_URL=ldap://ldap.example.com:389

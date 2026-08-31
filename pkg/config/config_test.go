@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,8 +15,8 @@ import (
 
 // TestMain keeps the suite hermetic: ambient LDAPADM_* vars from the
 // developer's shell (for example LDAPADM_TEST_* used by the integration
-// harness) would otherwise trip the strict allowlist in Load(). Tests that
-// need a variable set it explicitly with t.Setenv.
+// harness) would otherwise leak into Load(). Tests that need a variable set
+// it explicitly with t.Setenv.
 func TestMain(m *testing.M) {
 	for _, kv := range os.Environ() {
 		if !strings.HasPrefix(kv, "LDAPADM_") {
@@ -26,6 +27,36 @@ func TestMain(m *testing.M) {
 	}
 	os.Exit(m.Run())
 }
+
+// Non-secret LDAPADM_* contract names (R12), test-side. Runtime code never
+// reads them: envconfig resolves the short envFields tags against envPrefix
+// and Validate applies defaults. They stay here as the canonical documented
+// names used by the tests and pinned to the tags by TestEnvTagsMatchConstants.
+const (
+	ListenEnv       = "LDAPADM_LISTEN"
+	URLEnv          = "LDAPADM_URL"
+	BaseDNEnv       = "LDAPADM_BASE_DN"
+	BindDNEnv       = "LDAPADM_BIND_DN"
+	AutoNumberDNEnv = "LDAPADM_AUTO_NUMBER_DN"
+	LogLevelEnv     = "LDAPADM_LOG_LEVEL"
+	TemplatesDirEnv = "LDAPADM_TEMPLATES_DIR"
+
+	TLSMinVersionEnv           = "LDAPADM_MIN_VERSION"
+	TLSVerifyEnv               = "LDAPADM_VERIFY"
+	TLSStartTLSEnv             = "LDAPADM_START_TLS"
+	TLSCertExpiryFailClosedEnv = "LDAPADM_CERT_EXPIRY_FAIL_CLOSED"
+
+	SchemaCompatEnv          = "LDAPADM_SCHEMA_COMPAT"
+	TreeFilterEnv            = "LDAPADM_TREE_FILTER"
+	PoolSizeEnv              = "LDAPADM_POOL_SIZE"
+	PasswordPlainOverrideEnv = "LDAPADM_PASSWORD_PLAIN_OVERRIDE"
+	PasswordSchemeEnv        = "LDAPADM_PASSWORD_SCHEME"
+
+	SessionTimeoutMinutesEnv         = "LDAPADM_TIMEOUT_MINUTES"
+	SessionAbsoluteTimeoutMinutesEnv = "LDAPADM_ABSOLUTE_TIMEOUT_MINUTES"
+	SessionExpiredActionEnv          = "LDAPADM_EXPIRED_ACTION"
+	SessionDBPathEnv                 = "LDAPADM_DB_PATH"
+)
 
 // setEnv sets several env vars for the duration of the test.
 func setEnv(t *testing.T, vars map[string]string) {
@@ -194,28 +225,24 @@ func TestLoadShippedEnvNames(t *testing.T) {
 	}
 }
 
-func TestLoadEmptyEnvIgnored(t *testing.T) {
+func TestLoadEmptyStringEnvUsesDefaults(t *testing.T) {
+	// String fields flow through envconfig as empty and Validate applies
+	// the defaults (or leaves the field empty). Numeric/boolean fields fail
+	// at parse time instead (TestLoadEmptyIntBoolEnvParseErrors).
 	setEnv(t, map[string]string{
-		URLEnv:                           "ldap://127.0.0.1:389",
-		BaseDNEnv:                        "dc=example,dc=com",
-		BindDNEnv:                        "cn=admin,dc=example,dc=com",
-		ListenEnv:                        "",
-		AutoNumberDNEnv:                  "",
-		TLSMinVersionEnv:                 "",
-		TLSVerifyEnv:                     "",
-		TLSStartTLSEnv:                   "",
-		TLSCertExpiryFailClosedEnv:       "",
-		SchemaCompatEnv:                  "",
-		TreeFilterEnv:                    "",
-		PoolSizeEnv:                      "",
-		PasswordPlainOverrideEnv:         "",
-		PasswordSchemeEnv:                "",
-		SessionTimeoutMinutesEnv:         "",
-		SessionAbsoluteTimeoutMinutesEnv: "",
-		SessionExpiredActionEnv:          "",
-		SessionDBPathEnv:                 "",
-		LogLevelEnv:                      "",
-		TemplatesDirEnv:                  "",
+		URLEnv:                  "ldap://127.0.0.1:389",
+		BaseDNEnv:               "dc=example,dc=com",
+		BindDNEnv:               "cn=admin,dc=example,dc=com",
+		ListenEnv:               "",
+		AutoNumberDNEnv:         "",
+		TLSMinVersionEnv:        "",
+		SchemaCompatEnv:         "",
+		TreeFilterEnv:           "",
+		PasswordSchemeEnv:       "",
+		SessionExpiredActionEnv: "",
+		SessionDBPathEnv:        "",
+		LogLevelEnv:             "",
+		TemplatesDirEnv:         "",
 	})
 	cfg, err := Load()
 	if err != nil {
@@ -230,35 +257,14 @@ func TestLoadEmptyEnvIgnored(t *testing.T) {
 	if cfg.LDAP.TLS.MinVersion != DefaultTLSMinVersion {
 		t.Errorf("tls.min_version = %q, want default", cfg.LDAP.TLS.MinVersion)
 	}
-	if cfg.LDAP.TLS.Verify == nil || !*cfg.LDAP.TLS.Verify {
-		t.Error("tls.verify should default to true")
-	}
-	if cfg.LDAP.TLS.StartTLS == nil || !*cfg.LDAP.TLS.StartTLS {
-		t.Error("tls.start_tls should default to true")
-	}
-	if cfg.LDAP.TLS.CertExpiryFailClosed == nil || !*cfg.LDAP.TLS.CertExpiryFailClosed {
-		t.Error("tls.cert_expiry_fail_closed should default to true")
-	}
 	if cfg.LDAP.SchemaCompat != DefaultSchemaCompat {
 		t.Errorf("schema_compat = %q, want default", cfg.LDAP.SchemaCompat)
 	}
 	if cfg.LDAP.TreeFilter != DefaultTreeFilter {
 		t.Errorf("tree_filter = %q, want default", cfg.LDAP.TreeFilter)
 	}
-	if cfg.LDAP.PoolSize != DefaultPoolSize {
-		t.Errorf("pool_size = %d, want default", cfg.LDAP.PoolSize)
-	}
-	if cfg.LDAP.PasswordPlainOverride {
-		t.Error("password_plain_override should default to false")
-	}
 	if cfg.LDAP.PasswordScheme != "" {
 		t.Errorf("password_scheme = %q, want empty", cfg.LDAP.PasswordScheme)
-	}
-	if cfg.Session.TimeoutMinutes != DefaultIdleTimeoutMinutes {
-		t.Errorf("session.timeout_minutes = %d, want default", cfg.Session.TimeoutMinutes)
-	}
-	if cfg.Session.AbsoluteTimeoutMinutes != DefaultAbsoluteTimeoutHours*60 {
-		t.Errorf("session.absolute_timeout_minutes = %d, want default", cfg.Session.AbsoluteTimeoutMinutes)
 	}
 	if cfg.Session.ExpiredAction != ExpiredActionRetryBind {
 		t.Errorf("session.expired_action = %q, want default", cfg.Session.ExpiredAction)
@@ -271,6 +277,33 @@ func TestLoadEmptyEnvIgnored(t *testing.T) {
 	}
 	if cfg.TemplatesDir != "" {
 		t.Errorf("templates_dir = %q, want empty", cfg.TemplatesDir)
+	}
+}
+
+func TestLoadEmptyIntBoolEnvParseErrors(t *testing.T) {
+	// An explicitly empty numeric/boolean value is a configuration error:
+	// envconfig cannot convert "" and the parse error names the variable.
+	cases := []struct {
+		name string
+		env  string
+	}{
+		{"pool size", PoolSizeEnv},
+		{"verify", TLSVerifyEnv},
+		{"start tls", TLSStartTLSEnv},
+		{"cert expiry fail closed", TLSCertExpiryFailClosedEnv},
+		{"password plain override", PasswordPlainOverrideEnv},
+		{"idle timeout", SessionTimeoutMinutesEnv},
+		{"absolute timeout", SessionAbsoluteTimeoutMinutesEnv},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setEnv(t, minimalEnv())
+			t.Setenv(tc.env, "")
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), tc.env) {
+				t.Fatalf("want parse error naming %s, got %v", tc.env, err)
+			}
+		})
 	}
 }
 
@@ -343,7 +376,7 @@ func TestEnvPtrsStayNilWhenUnset(t *testing.T) {
 	// true defaults afterward.
 	setEnv(t, minimalEnv())
 	var env envFields
-	if err := envconfig.Process("", &env); err != nil {
+	if err := envconfig.Process(envPrefix, &env); err != nil {
 		t.Fatalf("Process: %v", err)
 	}
 	if env.TLSVerify != nil || env.TLSStartTLS != nil || env.TLSCertExpiryFailClosed != nil {
@@ -437,33 +470,14 @@ func TestLoadValidationErrors(t *testing.T) {
 	}
 }
 
-func TestLoadUnknownEnvVar(t *testing.T) {
-	setEnv(t, minimalEnv())
-	t.Setenv("LDAPADM_LITSEN", "1")
-	_, err := Load()
-	if err == nil || !strings.Contains(err.Error(), "LDAPADM_LITSEN") {
-		t.Fatalf("want unknown-var error naming LDAPADM_LITSEN, got %v", err)
-	}
-}
-
-func TestLoadUnknownEmptyEnvVarRejected(t *testing.T) {
-	// Strictness applies even to set-but-empty unknown vars.
-	setEnv(t, minimalEnv())
-	t.Setenv("LDAPADM_LITSEN", "")
-	_, err := Load()
-	if err == nil || !strings.Contains(err.Error(), "LDAPADM_LITSEN") {
-		t.Fatalf("want unknown-var error for empty value, got %v", err)
-	}
-}
-
 func TestLoadUnprefixedVarsIgnored(t *testing.T) {
-	// A stray unprefixed URL/VERIFY must never be read (full-name-tag guard).
+	// When the prefixed key is present it wins; the bare name is inert
+	// because envconfig's unprefixed fallback never triggers.
 	setEnv(t, map[string]string{
 		URLEnv:    "ldap://127.0.0.1:389",
 		BaseDNEnv: "dc=example,dc=com",
 		BindDNEnv: "cn=admin,dc=example,dc=com",
 		"URL":     "ldaps://wrong.example.com:636",
-		"VERIFY":  "false",
 	})
 	cfg, err := Load()
 	if err != nil {
@@ -472,8 +486,46 @@ func TestLoadUnprefixedVarsIgnored(t *testing.T) {
 	if cfg.LDAP.URL != "ldap://127.0.0.1:389" {
 		t.Errorf("url = %q, want the LDAPADM_ value", cfg.LDAP.URL)
 	}
-	if cfg.LDAP.TLS.Verify == nil || !*cfg.LDAP.TLS.Verify {
-		t.Error("verify should default to true; unprefixed VERIFY ignored")
+}
+
+func TestLoadBareNameFallback(t *testing.T) {
+	// Short-tag parsing makes envconfig fall back to the bare tag name when
+	// the prefixed key is missing (documented library behavior); the value
+	// is read as-is.
+	setEnv(t, map[string]string{
+		BaseDNEnv: "dc=example,dc=com",
+		BindDNEnv: "cn=admin,dc=example,dc=com",
+		"URL":     "ldap://bare.example.com:389",
+	})
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.LDAP.URL != "ldap://bare.example.com:389" {
+		t.Errorf("url = %q, want the bare URL fallback value", cfg.LDAP.URL)
+	}
+}
+
+func TestLoadEmptyPrefixedVarBlocksBareFallback(t *testing.T) {
+	// A set-but-empty prefixed key parses as empty (ok=true), so envconfig
+	// never consults the bare name; the empty value then fails validation.
+	setEnv(t, minimalEnv())
+	t.Setenv(URLEnv, "")
+	t.Setenv("URL", "ldap://bare.example.com:389")
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "ldap.url") {
+		t.Fatalf("want ldap.url validation error, got %v", err)
+	}
+}
+
+func TestLoadBareNameFallbackReadsBool(t *testing.T) {
+	// The fallback applies to non-string fields too: a bare VERIFY=false is
+	// parsed and then rejected by Validate, proving it was consumed.
+	setEnv(t, minimalEnv())
+	t.Setenv("VERIFY", "false")
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "verify") {
+		t.Fatalf("want verify validation error from bare fallback, got %v", err)
 	}
 }
 
@@ -500,35 +552,9 @@ func TestLoadIgnoresSecretVars(t *testing.T) {
 	}
 }
 
-func TestKnownEnvNamesComplete(t *testing.T) {
-	// The strict allowlist must cover exactly the parsed config fields plus
-	// the secret variables and their _FILE references -- no more, no less.
-	want := map[string]struct{}{
-		ListenEnv: {}, URLEnv: {}, BaseDNEnv: {}, BindDNEnv: {}, AutoNumberDNEnv: {},
-		TLSMinVersionEnv: {}, TLSVerifyEnv: {}, TLSStartTLSEnv: {}, TLSCertExpiryFailClosedEnv: {},
-		SchemaCompatEnv: {}, TreeFilterEnv: {}, PoolSizeEnv: {},
-		PasswordPlainOverrideEnv: {}, PasswordSchemeEnv: {},
-		SessionTimeoutMinutesEnv: {}, SessionAbsoluteTimeoutMinutesEnv: {},
-		SessionExpiredActionEnv: {}, SessionDBPathEnv: {},
-		LogLevelEnv: {}, TemplatesDirEnv: {},
-		BindPasswordEnv: {}, BindPasswordEnv + "_FILE": {},
-		AutoNumberPasswordEnv: {}, AutoNumberPasswordEnv + "_FILE": {},
-	}
-	for name := range want {
-		if _, ok := knownEnvNames[name]; !ok {
-			t.Errorf("allowlist missing %s", name)
-		}
-	}
-	for name := range knownEnvNames {
-		if _, ok := want[name]; !ok {
-			t.Errorf("allowlist contains unexpected %s", name)
-		}
-	}
-}
-
 func TestPasswordSchemeNormalized(t *testing.T) {
 	setEnv(t, minimalEnv())
-	t.Setenv(PasswordSchemeEnv, "ssha")
+	t.Setenv(PasswordSchemeEnv, "  ssha  ")
 	cfg, err := Load()
 	if err != nil {
 		t.Fatal(err)
@@ -569,8 +595,24 @@ func TestEnvTagsMatchConstants(t *testing.T) {
 			continue
 		}
 		got := sf.Tag.Get("envconfig")
-		if got != env {
-			t.Errorf("%s tag = %q, want %q", field, got, env)
+		if envPrefix+"_"+got != env {
+			t.Errorf("%s tag = %q, want %q (with %s prefix)", field, got, env, envPrefix)
+		}
+	}
+}
+
+func TestUsageIncludesContract(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Usage(&buf); err != nil {
+		t.Fatalf("Usage: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"LDAPADM_LISTEN", "LDAPADM_URL", "LDAPADM_PASSWORD_SCHEME",
+		"LDAPADM_TIMEOUT_MINUTES", "LDAPADM_DB_PATH",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("usage output missing %s", want)
 		}
 	}
 }

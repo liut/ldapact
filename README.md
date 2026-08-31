@@ -51,15 +51,21 @@ export LDAPADM_BIND_PASSWORD='your-secret'      # or LDAPADM_BIND_PASSWORD_FILE=
 open http://127.0.0.1:8389
 ```
 
-`bin/ldapact --version` prints the version; `-healthcheck` supports container
-health probes.
+`bin/ldapact --version` prints the version; `-config-help` prints the
+`LDAPADM_*` configuration reference; `-healthcheck` supports container health
+probes.
 
 ## Configuration
 
 There is no config file — the server is configured entirely by `LDAPADM_*`
-environment variables. Unknown `LDAPADM_*` variables fail startup (typo
-guard), and set-but-empty variables are treated as unset, so an empty value
-never overrides a default; defaults apply when a variable is absent.
+environment variables. Unknown `LDAPADM_*` variables are ignored; a variable
+set without the `LDAPADM_` prefix (for example `URL`) is read only when the
+prefixed key is absent (envconfig fallback), so set the prefixed key to be
+explicit. A variable set to an empty value is parsed as-is: numeric and
+boolean fields fail startup with a parse error naming the variable, string
+fields fall through to validation (defaulted or rejected); leave optional
+variables unset rather than empty. `ldapact -config-help` prints this
+reference (with descriptions) from the struct tags.
 
 | env var | default | notes |
 |---|---|---|
