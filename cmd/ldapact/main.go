@@ -43,7 +43,7 @@ func run(args []string) int {
 	)
 	fs.BoolVar(&showVersion, "version", false, "print version and exit")
 	fs.BoolVar(&healthcheck, "healthcheck", false, "check /healthz and exit (container health probes)")
-	fs.StringVar(&healthURL, "health-url", "http://127.0.0.1:8080/healthz", "URL for -healthcheck")
+	fs.StringVar(&healthURL, "health-url", "http://127.0.0.1:8389/healthz", "URL for -healthcheck")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}

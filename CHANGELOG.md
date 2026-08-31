@@ -3,6 +3,19 @@
 All notable changes to ldapact v1 are tracked here, one entry per implementation
 unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
 
+## Default listen port 8389 (2026-08-31)
+
+- Default `LDAPADM_LISTEN` moved from 8080 to 127.0.0.1:8389 (IANA-unassigned,
+  LDAP-flavored, low collision). README, `.env.example`, Dockerfile EXPOSE,
+  the `-healthcheck` default URL, and the systemd/Kubernetes deployment
+  artifacts follow.
+
+## Dockerfile builder improvements (2026-08-31)
+
+- Builder base switched to `golang:1.27-alpine` and module downloads go
+  through a commented-out GOPROXY line (goproxy.cn/goproxy.io/direct — enable
+  for CN networks); runtime stage is gcr.io/distroless/static-debian13.
+
 ## Test LDAP image switch (2026-08-31)
 
 - The Docker integration backend now uses `liut7/staffio-ldap` (Alpine

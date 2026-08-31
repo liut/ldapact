@@ -5,7 +5,7 @@
 # untouched. Unknown LDAPADM_* variables fail startup; empty values are
 # treated as unset so defaults apply. Full reference: README "Configuration".
 
-LDAPADM_LISTEN=127.0.0.1:8080
+LDAPADM_LISTEN=127.0.0.1:8389
 LDAPADM_URL=ldap://ldap.example.com:389
 LDAPADM_BASE_DN=dc=example,dc=com
 LDAPADM_BIND_DN=cn=admin,dc=example,dc=com

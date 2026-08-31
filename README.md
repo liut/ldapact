@@ -48,7 +48,7 @@ export LDAPADM_BASE_DN='dc=example,dc=com'
 export LDAPADM_BIND_DN='cn=admin,dc=example,dc=com'
 export LDAPADM_BIND_PASSWORD='your-secret'      # or LDAPADM_BIND_PASSWORD_FILE=/path/to/0600-file
 ./bin/ldapact
-open http://127.0.0.1:8080
+open http://127.0.0.1:8389
 ```
 
 `bin/ldapact --version` prints the version; `-healthcheck` supports container
@@ -63,7 +63,7 @@ never overrides a default; defaults apply when a variable is absent.
 
 | env var | default | notes |
 |---|---|---|
-| `LDAPADM_LISTEN` | `127.0.0.1:8080` | |
+| `LDAPADM_LISTEN` | `127.0.0.1:8389` | |
 | `LDAPADM_URL` | — (required) | `ldap://host:port` or `ldaps://host:port` |
 | `LDAPADM_BASE_DN` | — (required) | |
 | `LDAPADM_BIND_DN` | — (required) | |

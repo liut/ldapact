@@ -53,7 +53,7 @@ const (
 
 // Defaults (KTD 3, 5, 8; R2, R13).
 const (
-	DefaultListen               = "127.0.0.1:8080"
+	DefaultListen               = "127.0.0.1:8389"
 	DefaultIdleTimeoutMinutes   = 30
 	DefaultAbsoluteTimeoutHours = 8
 	DefaultPoolSize             = 8

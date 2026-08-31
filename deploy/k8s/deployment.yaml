@@ -3,7 +3,7 @@ kind: ConfigMap
 metadata:
   name: ldapact-config
 data:
-  LDAPADM_LISTEN: "0.0.0.0:8080"
+  LDAPADM_LISTEN: "0.0.0.0:8389"
   LDAPADM_URL: "ldap://ldap.example.com:389"
   LDAPADM_BASE_DN: "dc=example,dc=com"
   LDAPADM_BIND_DN: "cn=admin,dc=example,dc=com"
@@ -48,7 +48,7 @@ spec:
         - name: ldapact
           image: ghcr.io/liut/ldapact:latest
           ports:
-            - containerPort: 8080
+            - containerPort: 8389
           envFrom:
             - configMapRef:
                 name: ldapact-config
@@ -64,13 +64,13 @@ spec:
           livenessProbe:
             httpGet:
               path: /healthz
-              port: 8080
+              port: 8389
             initialDelaySeconds: 5
             periodSeconds: 30
           readinessProbe:
             httpGet:
               path: /healthz
-              port: 8080
+              port: 8389
             initialDelaySeconds: 2
             periodSeconds: 10
           resources:
@@ -98,5 +98,5 @@ spec:
   selector:
     app: ldapact
   ports:
-    - port: 8080
-      targetPort: 8080
+    - port: 8389
+      targetPort: 8389
