@@ -40,9 +40,13 @@ func TestIntegrationCreatePasswordRenameDelete(t *testing.T) {
 		t.Fatalf("connect: %v", err)
 	}
 	defer client.Close()
+	// U5: the main pool is unbound; every operation carries the bind
+	// credential in the request context (the authn middleware does this in
+	// production; these handler tests inject it directly).
+	adminCtx := ldapx.WithCredential(ctx, ldapx.BindCredential{DN: cfg.LDAP.BindDN, Password: inst.AdminPassword})
 
 	// Seed an OU container.
-	if err := client.Add(ctx, "ou=People,dc=example,dc=com", map[string][]string{
+	if err := client.Add(adminCtx, "ou=People,dc=example,dc=com", map[string][]string{
 		"objectClass": {"top", "organizationalUnit"}, "ou": {"People"},
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -63,6 +67,7 @@ func TestIntegrationCreatePasswordRenameDelete(t *testing.T) {
 	cReq := httptest.NewRequest(http.MethodPost, "/template/posixAccount/create", strings.NewReader(form.Encode()))
 	cReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	cReq.SetPathValue("name", "posixAccount")
+	cReq = cReq.WithContext(adminCtx)
 	h.CreateSubmit(rr, cReq)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("create code = %d: %s", rr.Code, rr.Body.String())
@@ -87,6 +92,7 @@ func TestIntegrationCreatePasswordRenameDelete(t *testing.T) {
 	pReq := httptest.NewRequest(http.MethodPost, "/entry/cn=alice,ou=People,dc=example,dc=com/password", strings.NewReader(pwForm.Encode()))
 	pReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	pReq.SetPathValue("dn", "cn=alice,ou=People,dc=example,dc=com")
+	pReq = pReq.WithContext(adminCtx)
 	h.PasswordChange(rr, pReq)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "Password changed") {
 		t.Fatalf("password change: %d %s", rr.Code, rr.Body.String())
@@ -106,6 +112,7 @@ func TestIntegrationCreatePasswordRenameDelete(t *testing.T) {
 	rReq := httptest.NewRequest(http.MethodPost, "/entry/cn=alice,ou=People,dc=example,dc=com/rename", strings.NewReader(rForm.Encode()))
 	rReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rReq.SetPathValue("dn", "cn=alice,ou=People,dc=example,dc=com")
+	rReq = rReq.WithContext(adminCtx)
 	h.RenameSubmit(rr, rReq)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("rename code = %d: %s", rr.Code, rr.Body.String())
@@ -117,6 +124,7 @@ func TestIntegrationCreatePasswordRenameDelete(t *testing.T) {
 	dReq := httptest.NewRequest(http.MethodPost, "/entry/cn=alice2,ou=People,dc=example,dc=com/delete", strings.NewReader(dForm.Encode()))
 	dReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	dReq.SetPathValue("dn", "cn=alice2,ou=People,dc=example,dc=com")
+	dReq = dReq.WithContext(adminCtx)
 	h.DeleteSubmit(rr, dReq)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("delete code = %d: %s", rr.Code, rr.Body.String())
@@ -143,14 +151,15 @@ func TestIntegrationEditEntry(t *testing.T) {
 		t.Fatalf("connect: %v", err)
 	}
 	defer client.Close()
+	adminCtx := ldapx.WithCredential(ctx, ldapx.BindCredential{DN: cfg.LDAP.BindDN, Password: inst.AdminPassword})
 
-	if err := client.Add(ctx, "ou=People,dc=example,dc=com", map[string][]string{
+	if err := client.Add(adminCtx, "ou=People,dc=example,dc=com", map[string][]string{
 		"objectClass": {"top", "organizationalUnit"}, "ou": {"People"},
 	}); err != nil {
 		t.Fatalf("seed OU: %v", err)
 	}
 	dn := "cn=alice,ou=People,dc=example,dc=com"
-	if err := client.Add(ctx, dn, map[string][]string{
+	if err := client.Add(adminCtx, dn, map[string][]string{
 		"objectClass": {"top", "person", "inetOrgPerson"},
 		"cn":          {"alice"}, "sn": {"Smith"}, "givenName": {"Alice"},
 		"mail":      {"alice@example.com"},
@@ -162,7 +171,7 @@ func TestIntegrationEditEntry(t *testing.T) {
 	// so his edit form exercises the generic editor and its schema-driven
 	// controls; postalAddress (Postal Address syntax) is core-schema MAY.
 	bobDN := "cn=bob,ou=People,dc=example,dc=com"
-	if err := client.Add(ctx, bobDN, map[string][]string{
+	if err := client.Add(adminCtx, bobDN, map[string][]string{
 		"objectClass": {"top", "person", "organizationalPerson"},
 		"cn":          {"bob"}, "sn": {"Jones"},
 		"postalAddress": {"123 Main St\nSpringfield"},
@@ -178,6 +187,7 @@ func TestIntegrationEditEntry(t *testing.T) {
 	rr := httptest.NewRecorder()
 	dReq := httptest.NewRequest(http.MethodGet, "/entry/"+dn, nil)
 	dReq.SetPathValue("dn", dn)
+	dReq = dReq.WithContext(adminCtx)
 	h.Detail(rr, dReq)
 	if !strings.Contains(rr.Body.String(), `/photo?idx=0"`) {
 		t.Fatalf("detail photo rendering missing: %.300s", rr.Body.String())
@@ -185,6 +195,7 @@ func TestIntegrationEditEntry(t *testing.T) {
 	prr := httptest.NewRecorder()
 	pReq := httptest.NewRequest(http.MethodGet, "/api/entry/"+dn+"/photo?idx=0", nil)
 	pReq.SetPathValue("dn", dn)
+	pReq = pReq.WithContext(adminCtx)
 	h.Photo(prr, pReq)
 	if prr.Code != http.StatusOK || prr.Header().Get("Content-Type") != "image/jpeg" {
 		t.Fatalf("photo endpoint = %d ct=%q", prr.Code, prr.Header().Get("Content-Type"))
@@ -194,6 +205,7 @@ func TestIntegrationEditEntry(t *testing.T) {
 	rr = httptest.NewRecorder()
 	gReq := httptest.NewRequest(http.MethodGet, "/entry/"+dn+"/edit", nil)
 	gReq.SetPathValue("dn", dn)
+	gReq = gReq.WithContext(adminCtx)
 	h.EditForm(rr, gReq)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "Generic: Address Book Entry") {
 		t.Fatalf("edit form = %d: %.400s", rr.Code, rr.Body.String())
@@ -219,6 +231,7 @@ func TestIntegrationEditEntry(t *testing.T) {
 	rReq := httptest.NewRequest(http.MethodPost, "/entry/"+dn+"/edit", strings.NewReader(form.Encode()))
 	rReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rReq.SetPathValue("dn", dn)
+	rReq = rReq.WithContext(adminCtx)
 	h.EditSubmit(rr, rReq)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "Review changes") {
 		t.Fatalf("review = %d: %.400s", rr.Code, rr.Body.String())
@@ -229,12 +242,13 @@ func TestIntegrationEditEntry(t *testing.T) {
 	aReq := httptest.NewRequest(http.MethodPost, "/entry/"+dn+"/edit", strings.NewReader(form.Encode()))
 	aReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	aReq.SetPathValue("dn", dn)
+	aReq = aReq.WithContext(adminCtx)
 	h.EditSubmit(rr, aReq)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "Entry updated") {
 		t.Fatalf("apply = %d: %.400s", rr.Code, rr.Body.String())
 	}
 
-	res, err := client.Search(ctx, ldap.NewSearchRequest(dn, ldap.ScopeBaseObject,
+	res, err := client.Search(adminCtx, ldap.NewSearchRequest(dn, ldap.ScopeBaseObject,
 		ldap.NeverDerefAliases, 0, 0, false, "(objectClass=*)", []string{"*"}, nil))
 	if err != nil {
 		t.Fatal(err)
@@ -254,6 +268,7 @@ func TestIntegrationEditEntry(t *testing.T) {
 	rr = httptest.NewRecorder()
 	bReq := httptest.NewRequest(http.MethodGet, "/entry/"+bobDN+"/edit", nil)
 	bReq.SetPathValue("dn", bobDN)
+	bReq = bReq.WithContext(adminCtx)
 	h.EditForm(rr, bReq)
 	bobForm := rr.Body.String()
 	if rr.Code != http.StatusOK {
@@ -281,6 +296,7 @@ func TestIntegrationEditEntry(t *testing.T) {
 	bReq = httptest.NewRequest(http.MethodPost, "/entry/"+bobDN+"/edit", strings.NewReader(bobValues.Encode()))
 	bReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	bReq.SetPathValue("dn", bobDN)
+	bReq = bReq.WithContext(adminCtx)
 	h.EditSubmit(rr, bReq)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "456 Oak Ave") {
 		t.Fatalf("bob review = %d: %.400s", rr.Code, rr.Body.String())
@@ -290,11 +306,12 @@ func TestIntegrationEditEntry(t *testing.T) {
 	bReq = httptest.NewRequest(http.MethodPost, "/entry/"+bobDN+"/edit", strings.NewReader(bobValues.Encode()))
 	bReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	bReq.SetPathValue("dn", bobDN)
+	bReq = bReq.WithContext(adminCtx)
 	h.EditSubmit(rr, bReq)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "Entry updated") {
 		t.Fatalf("bob apply = %d: %.400s", rr.Code, rr.Body.String())
 	}
-	bRes, err := client.Search(ctx, ldap.NewSearchRequest(bobDN, ldap.ScopeBaseObject,
+	bRes, err := client.Search(adminCtx, ldap.NewSearchRequest(bobDN, ldap.ScopeBaseObject,
 		ldap.NeverDerefAliases, 0, 0, false, "(objectClass=*)", []string{"*"}, nil))
 	if err != nil {
 		t.Fatal(err)
@@ -309,6 +326,7 @@ func TestIntegrationEditEntry(t *testing.T) {
 	bReq = httptest.NewRequest(http.MethodPost, "/entry/"+bobDN+"/edit", strings.NewReader(bobValues.Encode()))
 	bReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	bReq.SetPathValue("dn", bobDN)
+	bReq = bReq.WithContext(adminCtx)
 	h.EditSubmit(rr, bReq)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "No changes") {
 		t.Fatalf("bob unchanged apply = %d: %.400s", rr.Code, rr.Body.String())
@@ -320,6 +338,7 @@ func TestIntegrationEditEntry(t *testing.T) {
 	rr = httptest.NewRecorder()
 	bReq = httptest.NewRequest(http.MethodGet, "/entry/"+bobDN+"/edit", nil)
 	bReq.SetPathValue("dn", bobDN)
+	bReq = bReq.WithContext(adminCtx)
 	h.EditForm(rr, bReq)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `name="add_attr"`) {
 		t.Fatalf("bob add-attribute picker = %d: %.300s", rr.Code, rr.Body.String())
@@ -336,6 +355,7 @@ func TestIntegrationEditEntry(t *testing.T) {
 		}.Encode()))
 	bReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	bReq.SetPathValue("dn", bobDN)
+	bReq = bReq.WithContext(adminCtx)
 	h.EditSubmit(rr, bReq)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `name="postalCode"`) {
 		t.Fatalf("bob add postalCode = %d: %.300s", rr.Code, rr.Body.String())
@@ -351,11 +371,12 @@ func TestIntegrationEditEntry(t *testing.T) {
 		}.Encode()))
 	bReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	bReq.SetPathValue("dn", bobDN)
+	bReq = bReq.WithContext(adminCtx)
 	h.EditSubmit(rr, bReq)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "Entry updated") {
 		t.Fatalf("bob apply postalCode = %d: %.400s", rr.Code, rr.Body.String())
 	}
-	bRes, err = client.Search(ctx, ldap.NewSearchRequest(bobDN, ldap.ScopeBaseObject,
+	bRes, err = client.Search(adminCtx, ldap.NewSearchRequest(bobDN, ldap.ScopeBaseObject,
 		ldap.NeverDerefAliases, 0, 0, false, "(objectClass=*)", []string{"*"}, nil))
 	if err != nil {
 		t.Fatal(err)
@@ -376,11 +397,12 @@ func TestIntegrationEditEntry(t *testing.T) {
 		}.Encode()))
 	bReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	bReq.SetPathValue("dn", bobDN)
+	bReq = bReq.WithContext(adminCtx)
 	h.EditSubmit(rr, bReq)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "Entry updated") {
 		t.Fatalf("bob clear postalAddress = %d: %.400s", rr.Code, rr.Body.String())
 	}
-	bRes, err = client.Search(ctx, ldap.NewSearchRequest(bobDN, ldap.ScopeBaseObject,
+	bRes, err = client.Search(adminCtx, ldap.NewSearchRequest(bobDN, ldap.ScopeBaseObject,
 		ldap.NeverDerefAliases, 0, 0, false, "(objectClass=*)", []string{"*"}, nil))
 	if err != nil {
 		t.Fatal(err)
@@ -417,11 +439,12 @@ func TestIntegrationEditEntry(t *testing.T) {
 	photoReq := httptest.NewRequest(http.MethodPost, "/entry/"+dn+"/edit", strings.NewReader(aForm.Encode()))
 	photoReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	photoReq.SetPathValue("dn", dn)
+	photoReq = photoReq.WithContext(adminCtx)
 	h.EditSubmit(rr, photoReq)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "Entry updated") {
 		t.Fatalf("alice photo apply = %d: %.400s", rr.Code, rr.Body.String())
 	}
-	photoRes, err := client.Search(ctx, ldap.NewSearchRequest(dn, ldap.ScopeBaseObject,
+	photoRes, err := client.Search(adminCtx, ldap.NewSearchRequest(dn, ldap.ScopeBaseObject,
 		ldap.NeverDerefAliases, 0, 0, false, "(objectClass=*)", []string{"jpegPhoto"}, nil))
 	if err != nil {
 		t.Fatal(err)

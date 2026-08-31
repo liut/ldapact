@@ -77,6 +77,18 @@ func isRetryable(err error) bool {
 	return false
 }
 
+// IsInvalidCredentials reports whether err is an LDAP invalidCredentials
+// (result code 49) failure. The authn layer treats this as "session
+// invalid → clear session and redirect to login" (R8/AE5); the replica layer
+// never failovers on it (same directory identity on every replica).
+func IsInvalidCredentials(err error) bool {
+	var le *LDAPError
+	if errors.As(err, &le) {
+		return le.Code == ldap.LDAPResultInvalidCredentials
+	}
+	return false
+}
+
 // backoffFor returns the exponential backoff for the given 1-based attempt:
 // 50ms, 100ms, 200ms, ... capped at 2s (KTD 5).
 func backoffFor(attempt int) time.Duration {

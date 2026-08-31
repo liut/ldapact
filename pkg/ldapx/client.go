@@ -11,7 +11,9 @@ import (
 )
 
 // Client is the admin-tool-specific LDAP facade: pool + auto-number pool +
-// cached subschema. It is created once at startup (AE1 auto-bind).
+// cached subschema. The main pool is unbound (U5/R15): every operation binds
+// with the request credential from the context. The subschema cache loads
+// lazily on the first authenticated operation.
 type Client struct {
 	pool     *Pool
 	autoPool *Pool
@@ -22,14 +24,14 @@ type Client struct {
 	filter   string
 }
 
-// New dials and binds the admin pool, optionally the auto-number pool, and
-// loads the subschema cache — all fail-fast (R1, R14, AE1).
+// New dials the admin pool (fail-fast reachability/TLS probe, R15) and the
+// optional auto-number pool (bound, R8). The subschema cache is loaded
+// lazily on the first authenticated operation (U5); credential validation
+// happens at login instead of startup.
 func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*Client, error) {
 	dialOpts := DialOptions{URL: cfg.LDAP.URL, TLS: cfg.LDAP.TLS, Logger: logger}
 	pool, err := NewPool(ctx, PoolOptions{
 		Size:           cfg.LDAP.PoolSize,
-		BindDN:         cfg.LDAP.BindDN,
-		BindPassword:   cfg.BindPassword,
 		Dial:           dialOpts,
 		HealthInterval: 30 * time.Second,
 	})
@@ -55,10 +57,6 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*Client,
 			return nil, fmt.Errorf("ldapx: auto-number pool: %w", err)
 		}
 		c.autoPool = ap
-	}
-	if err := c.loadSchema(ctx); err != nil {
-		c.Close()
-		return nil, err
 	}
 	return c, nil
 }

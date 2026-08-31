@@ -26,11 +26,20 @@ func newTestPool(conns ...Conn) *Pool {
 	return p
 }
 
+// newBoundTestPool builds a pool with a configured bind identity, so
+// validate-on-Put and the bound-path semantics apply.
+func newBoundTestPool(conns ...Conn) *Pool {
+	p := newTestPool(conns...)
+	p.opts.BindDN = "cn=admin,dc=example,dc=com"
+	p.opts.BindPassword = "admin-password"
+	return p
+}
+
 func TestPoolPutDropsInvalidConn(t *testing.T) {
 	f := &fakeConn{searchFn: func(*ldap.SearchRequest) (*ldap.SearchResult, error) {
 		return nil, ldap.NewError(ldap.ErrorNetwork, errors.New("dead"))
 	}}
-	p := newTestPool(f)
+	p := newBoundTestPool(f)
 	if err := p.Put(f); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
@@ -41,7 +50,7 @@ func TestPoolPutDropsInvalidConn(t *testing.T) {
 
 func TestPoolPutReturnsHealthyConn(t *testing.T) {
 	f := &fakeConn{}
-	p := newTestPool()
+	p := newBoundTestPool()
 	if err := p.Put(f); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
@@ -50,6 +59,43 @@ func TestPoolPutReturnsHealthyConn(t *testing.T) {
 	}
 	if p.Len() != 1 {
 		t.Errorf("Len = %d, want 1", p.Len())
+	}
+}
+
+func TestPoolPutUnboundSkipsValidationSearch(t *testing.T) {
+	f := &fakeConn{}
+	p := newTestPool(f)
+	got, err := p.Get(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Put(got); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	if f.closed.Load() {
+		t.Error("unbound Put must not close a healthy conn")
+	}
+	if f.searchCalls.Load() != 0 {
+		t.Errorf("unbound Put must not run the validation search, got %d calls", f.searchCalls.Load())
+	}
+	if p.Len() != 1 {
+		t.Errorf("Len = %d, want 1", p.Len())
+	}
+}
+
+func TestPoolPutUnboundDropsClosingConn(t *testing.T) {
+	f := &fakeConn{}
+	p := newTestPool(f)
+	got, err := p.Get(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got.Close() // IsClosing becomes true
+	if err := p.Put(got); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	if p.Len() != 0 {
+		t.Errorf("Len = %d, want 0 (closing conn dropped)", p.Len())
 	}
 }
 
@@ -94,8 +140,72 @@ func TestPoolDoRetriesOnNetworkError(t *testing.T) {
 	if good.closed.Load() {
 		t.Error("good conn should stay open")
 	}
-	if good.searchCalls.Load() != 2 {
-		t.Errorf("good conn search calls = %d, want 2 (the op, then a successful Put validation)", good.searchCalls.Load())
+	if good.searchCalls.Load() != 1 {
+		t.Errorf("good conn search calls = %d, want 1 (unbound Put skips validation)", good.searchCalls.Load())
+	}
+}
+
+func TestPoolDoBindsRequestCredential(t *testing.T) {
+	f := &fakeConn{}
+	p := newTestPool(f)
+	ctx := WithCredential(context.Background(), BindCredential{
+		DN:       "cn=admin,dc=example,dc=com",
+		Password: "admin-password",
+	})
+	if err := p.Do(ctx, func(c Conn) error { return nil }); err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	if f.lastBindUser != "cn=admin,dc=example,dc=com" || f.lastBindPass != "admin-password" {
+		t.Errorf("bind = %q/%q, want request credential", f.lastBindUser, f.lastBindPass)
+	}
+}
+
+func TestPoolDoBindsAnonymousWithoutCredential(t *testing.T) {
+	f := &fakeConn{}
+	p := newTestPool(f)
+	if err := p.Do(context.Background(), func(c Conn) error { return nil }); err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	if f.lastBindUser != "" {
+		t.Errorf("bind user = %q, want anonymous", f.lastBindUser)
+	}
+}
+
+func TestPoolDoBindFailureDropsConn(t *testing.T) {
+	f := &fakeConn{bindFn: func(user, pass string) error {
+		return ldap.NewError(49, errors.New("invalid credentials"))
+	}}
+	p := newTestPool(f)
+	fnCalls := 0
+	err := p.Do(WithCredential(context.Background(), BindCredential{
+		DN: "cn=admin,dc=example,dc=com", Password: "wrong",
+	}), func(c Conn) error {
+		fnCalls++
+		return nil
+	})
+	if err == nil {
+		t.Fatal("want bind error")
+	}
+	if !IsInvalidCredentials(err) {
+		t.Fatalf("want invalidCredentials error, got %v", err)
+	}
+	if fnCalls != 0 {
+		t.Errorf("fn must not run after bind failure, ran %d times", fnCalls)
+	}
+	if !f.closed.Load() {
+		t.Error("conn must be closed after bind failure (no stale identity)")
+	}
+}
+
+func TestPoolBoundSkipsRequestBind(t *testing.T) {
+	f := &fakeConn{bindFn: func(user, pass string) error {
+		t.Fatal("bound pool must not bind with request credential")
+		return nil
+	}}
+	p := newBoundTestPool(f)
+	ctx := WithCredential(context.Background(), BindCredential{DN: "someone", Password: "else"})
+	if err := p.Do(ctx, func(c Conn) error { return nil }); err != nil {
+		t.Fatalf("Do: %v", err)
 	}
 }
 

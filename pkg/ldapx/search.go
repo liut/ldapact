@@ -49,6 +49,19 @@ type PageResult struct {
 // Search runs a single LDAP search through the pool with one retry on
 // network-level failures.
 func (c *Client) Search(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+	if err := c.ensureSchema(ctx); err != nil {
+		return nil, err
+	}
+	res, err := c.search(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// search runs a single LDAP search through the pool without triggering the
+// lazy schema load (loadSchema itself uses this to avoid recursion).
+func (c *Client) search(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
 	var res *ldap.SearchResult
 	err := c.pool.Do(ctx, func(conn Conn) error {
 		var err error
@@ -71,6 +84,9 @@ func (c *Client) Search(ctx context.Context, req *ldap.SearchRequest) (*ldap.Sea
 // sessions are connection-scoped (sending a cookie on another connection
 // yields "paged results cookie is invalid").
 func (c *Client) Page(ctx context.Context, opts SearchOptions, page int) (*PageResult, error) {
+	if err := c.ensureSchema(ctx); err != nil {
+		return nil, err
+	}
 	if page < 1 {
 		page = 1
 	}
@@ -88,6 +104,10 @@ func (c *Client) Page(ctx context.Context, opts SearchOptions, page int) (*PageR
 	if err != nil {
 		return nil, err
 	}
+	if err := c.pool.bindFor(ctx, conn); err != nil {
+		conn.Close()
+		return nil, err
+	}
 	for attempt := 1; ; attempt++ {
 		res, perr := pageLoop(ctx, conn, opts, page)
 		if perr == nil {
@@ -95,7 +115,11 @@ func (c *Client) Page(ctx context.Context, opts SearchOptions, page int) (*PageR
 			return res, nil
 		}
 		if attempt == 1 && isRetryable(perr) {
-			_ = c.pool.Put(conn) // validates and drops the sick conn
+			if c.pool.opts.BindDN == "" {
+				conn.Close()
+			} else {
+				_ = c.pool.Put(conn) // validates and drops the sick conn
+			}
 			select {
 			case <-time.After(backoffFor(attempt)):
 			case <-ctx.Done():
@@ -103,6 +127,10 @@ func (c *Client) Page(ctx context.Context, opts SearchOptions, page int) (*PageR
 			}
 			conn, err = c.pool.Get(ctx)
 			if err != nil {
+				return nil, err
+			}
+			if err := c.pool.bindFor(ctx, conn); err != nil {
+				conn.Close()
 				return nil, err
 			}
 			continue

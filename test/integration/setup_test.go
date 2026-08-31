@@ -55,6 +55,12 @@ func startEnv(ctx context.Context) {
 	envCtx, envCancel = context.WithCancel(ctx)
 	envCfg = envInst.Config()
 	envCfg.LDAP.PoolSize = 4
+	// U5: the client pool is unbound; seeding carries the admin bind
+	// credential in the context (the login gate supplies it in production).
+	envCtx = ldapx.WithCredential(envCtx, ldapx.BindCredential{
+		DN:       envCfg.LDAP.BindDN,
+		Password: envInst.AdminPassword,
+	})
 	envLogBuf = &bytes.Buffer{}
 	envLogger = slog.New(slog.NewJSONHandler(envLogBuf, nil))
 	var err error
