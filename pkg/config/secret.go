@@ -108,14 +108,30 @@ func SecretFingerprint(s string) string {
 	}
 }
 
-// ResolveSecrets fills the runtime BindPassword and AutoNumberPassword fields.
-// The auto-number secret is only resolved when AutoNumberDN is configured.
+// ResolveSecrets fills the runtime secret fields:
+//   - LDAPADM_SESSION_KEY is required (U4 cipher key; changing it invalidates
+//     every stored encrypted credential, R14).
+//   - LDAPADM_REDIS_PASSWORD is resolved only when the redis store is
+//     selected and the env var / file reference is present (optional; Redis
+//     without auth is allowed).
+//   - LDAPADM_AUTO_NUMBER_PASSWORD is resolved only when AutoNumberDN is
+//     configured.
+//   - LDAPADM_BIND_PASSWORD is no longer resolved (R15): the bind credential
+//     moves to the login flow. BindPassword remains on Config only for
+//     transitional code until the ldapx pool refactor lands.
 func (c *Config) ResolveSecrets() error {
-	bp, err := ResolveSecret(BindPasswordEnv)
+	sk, err := ResolveSecret(SessionKeyEnv)
 	if err != nil {
-		return err
+		return fmt.Errorf("session key: %w", err)
 	}
-	c.BindPassword = bp
+	c.SessionKey = sk
+	if c.Session.Store == SessionStoreRedis {
+		rp, err := resolveOptionalSecret(RedisPasswordEnv)
+		if err != nil {
+			return fmt.Errorf("redis password: %w", err)
+		}
+		c.RedisPassword = rp
+	}
 	if c.LDAP.AutoNumberDN != "" {
 		ap, err := ResolveSecret(AutoNumberPasswordEnv)
 		if err != nil {
@@ -124,6 +140,20 @@ func (c *Config) ResolveSecrets() error {
 		c.AutoNumberPassword = ap
 	}
 	return nil
+}
+
+// resolveOptionalSecret resolves a secret only when its env var or _FILE
+// reference is present; an absent secret resolves to "". It never falls back
+// to a TTY prompt, so optional secrets (like a no-auth Redis) do not hang
+// startup.
+func resolveOptionalSecret(name string) (string, error) {
+	if v := os.Getenv(name); v != "" {
+		return v, nil
+	}
+	if p := os.Getenv(name + "_FILE"); p != "" {
+		return readSecretFile(p)
+	}
+	return "", nil
 }
 
 // scanSecrets is a small helper kept for tests that need a bufio reader on a

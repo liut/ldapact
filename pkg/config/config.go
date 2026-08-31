@@ -32,6 +32,8 @@ const envPrefix = "LDAPADM"
 const (
 	BindPasswordEnv       = "LDAPADM_BIND_PASSWORD"
 	AutoNumberPasswordEnv = "LDAPADM_AUTO_NUMBER_PASSWORD"
+	SessionKeyEnv         = "LDAPADM_SESSION_KEY"
+	RedisPasswordEnv      = "LDAPADM_REDIS_PASSWORD"
 )
 
 // Defaults (KTD 3, 5, 8; R2, R13).
@@ -44,7 +46,15 @@ const (
 	DefaultSchemaCompat         = "openldap"
 	DefaultLogLevel             = "info"
 	DefaultSessionDBPath        = "/var/lib/ldapact/sessions.db"
+	DefaultSessionStore         = "redis"
 	DefaultTLSMinVersion        = "TLSv1.2"
+)
+
+// Session store backends (R1).
+const (
+	SessionStoreRedis  = "redis"
+	SessionStoreBbolt  = "bbolt"
+	SessionStoreMemory = "memory"
 )
 
 // FallbackSessionDBPath returns the per-user XDG state path
@@ -91,9 +101,14 @@ func defaultSessionDBPathFor(systemDir, fallback string) string {
 	return fallback
 }
 
-// Session expiry actions (R13).
+// Session expiry actions (R13). retry_bind was removed: expired sessions now
+// always redirect to /login (R8), so ExpiredActionRetryBind is retained only
+// as a documented, rejected value.
 const (
-	ExpiredActionRetryBind     = "retry_bind"
+	// ExpiredActionRetryBind is rejected by validation (R8). Kept so
+	// diagnostics and migration notes can name the removed value.
+	ExpiredActionRetryBind = "retry_bind"
+	// ExpiredActionRedirectLogin is the default and only allowed value.
 	ExpiredActionRedirectLogin = "redirect_to_login"
 )
 
@@ -109,7 +124,10 @@ type TLSConfig struct {
 
 // LDAPConfig is the single-server profile (R12).
 type LDAPConfig struct {
-	URL          string
+	URL string
+	// Servers is the replica list (LDAPADM_SERVERS). When set it replaces
+	// URL entirely (R10); URL and Servers are mutually exclusive.
+	Servers      []string
 	BaseDN       string
 	BindDN       string
 	AutoNumberDN string
@@ -128,6 +146,12 @@ type LDAPConfig struct {
 
 // SessionConfig carries the cookie/session security settings (R13, KTD 8).
 type SessionConfig struct {
+	// Store selects the session backend: redis (default) | bbolt | memory.
+	Store string
+	// RedisURL is redis://host:port or rediss://host:port (R2).
+	RedisURL string
+	// RedisDB selects the Redis logical database.
+	RedisDB                int
 	TimeoutMinutes         int
 	AbsoluteTimeoutMinutes int
 	ExpiredAction          string
@@ -149,6 +173,10 @@ type Config struct {
 	LogLevel     string
 	TemplatesDir string
 
+	// SessionKey and RedisPassword are runtime-only values filled by
+	// ResolveSecrets; they are never parsed from the environment.
+	SessionKey         string
+	RedisPassword      string
 	BindPassword       string
 	AutoNumberPassword string
 }
@@ -181,8 +209,13 @@ type envFields struct {
 
 	SessionTimeoutMinutes         int    `envconfig:"TIMEOUT_MINUTES" desc:"session idle timeout in minutes, 5..240 (default 30)"`
 	SessionAbsoluteTimeoutMinutes int    `envconfig:"ABSOLUTE_TIMEOUT_MINUTES" desc:"session absolute timeout in minutes, 30..1440 (default 480)"`
-	SessionExpiredAction          string `envconfig:"EXPIRED_ACTION" desc:"session expiry action: retry_bind|redirect_to_login (default retry_bind)"`
+	SessionExpiredAction          string `envconfig:"EXPIRED_ACTION" desc:"session expiry action (default redirect_to_login)"`
 	SessionDBPath                 string `envconfig:"DB_PATH" desc:"sessions.db path (default /var/lib/ldapact/sessions.db; falls back to ~/.local/state/ldapact/sessions.db when /var/lib/ldapact is absent)"`
+
+	SessionStore string   `envconfig:"SESSION_STORE" desc:"session store backend: redis|bbolt|memory (default redis)"`
+	RedisURL     string   `envconfig:"REDIS_URL" desc:"Redis server URL: redis://host:port or rediss://host:port (required when SESSION_STORE=redis)"`
+	RedisDB      int      `envconfig:"REDIS_DB" desc:"Redis database number (default 0)"`
+	Servers      []string `envconfig:"SERVERS" desc:"comma-separated LDAP replica URLs (mutually exclusive with URL)"`
 }
 
 // Load reads, defaults, and validates the server profile from LDAPADM_*
@@ -222,6 +255,10 @@ func (e envFields) toConfig() Config {
 	c.Session.AbsoluteTimeoutMinutes = e.SessionAbsoluteTimeoutMinutes
 	c.Session.ExpiredAction = e.SessionExpiredAction
 	c.Session.DBPath = e.SessionDBPath
+	c.Session.Store = e.SessionStore
+	c.Session.RedisURL = e.RedisURL
+	c.Session.RedisDB = e.RedisDB
+	c.LDAP.Servers = e.Servers
 	c.LogLevel = e.LogLevel
 	c.TemplatesDir = e.TemplatesDir
 	return c
@@ -253,9 +290,32 @@ func (c *Config) Validate() error {
 }
 
 func (c *Config) validateLDAP() error {
-	u, err := url.Parse(c.LDAP.URL)
-	if err != nil || (u.Scheme != "ldap" && u.Scheme != "ldaps") || u.Host == "" {
-		return errors.New("ldap.url must be ldap://host:port or ldaps://host:port")
+	scheme := ""
+	if len(c.LDAP.Servers) > 0 {
+		if c.LDAP.URL != "" {
+			return errors.New("ldap.servers and ldap.url are mutually exclusive: set LDAPADM_SERVERS for replicas or LDAPADM_URL for a single server")
+		}
+		for i, srv := range c.LDAP.Servers {
+			if srv == "" {
+				return fmt.Errorf("ldap.servers[%d] is empty", i)
+			}
+			if err := validateLDAPURL(srv); err != nil {
+				return fmt.Errorf("ldap.servers[%d]: %w", i, err)
+			}
+		}
+		if u, err := url.Parse(c.LDAP.Servers[0]); err == nil {
+			scheme = u.Scheme
+		}
+	} else {
+		if c.LDAP.URL == "" {
+			return errors.New("ldap.url or ldap.servers is required")
+		}
+		if err := validateLDAPURL(c.LDAP.URL); err != nil {
+			return errors.New("ldap.url must be ldap://host:port or ldaps://host:port")
+		}
+		if u, err := url.Parse(c.LDAP.URL); err == nil {
+			scheme = u.Scheme
+		}
 	}
 	if c.LDAP.BaseDN == "" {
 		return errors.New("ldap.base_dn is required")
@@ -303,7 +363,7 @@ func (c *Config) validateLDAP() error {
 		v := true
 		t.CertExpiryFailClosed = &v
 	}
-	if u.Scheme == "ldaps" {
+	if scheme == "ldaps" {
 		if t.StartTLS != nil && *t.StartTLS {
 			return errors.New("tls.start_tls cannot be enabled with ldaps:// (use one or the other)")
 		}
@@ -314,8 +374,35 @@ func (c *Config) validateLDAP() error {
 	return nil
 }
 
+// validateLDAPURL checks a single ldap:// or ldaps:// replica URL.
+func validateLDAPURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "ldap" && u.Scheme != "ldaps") || u.Host == "" {
+		return errors.New("must be ldap://host:port or ldaps://host:port")
+	}
+	return nil
+}
+
 func (c *Config) validateSession() error {
 	s := &c.Session
+	if s.Store == "" {
+		s.Store = DefaultSessionStore
+	}
+	s.Store = strings.ToLower(s.Store)
+	switch s.Store {
+	case SessionStoreRedis, SessionStoreBbolt, SessionStoreMemory:
+	default:
+		return fmt.Errorf("session.store must be redis|bbolt|memory, got %q", s.Store)
+	}
+	if s.RedisURL != "" {
+		u, err := url.Parse(s.RedisURL)
+		if err != nil || (u.Scheme != "redis" && u.Scheme != "rediss") || u.Host == "" {
+			return errors.New("session.redis_url must be redis://host:port or rediss://host:port")
+		}
+	}
+	if s.Store == SessionStoreRedis && s.RedisURL == "" {
+		return errors.New("session.redis_url is required when session.store=redis")
+	}
 	if s.TimeoutMinutes == 0 {
 		s.TimeoutMinutes = DefaultIdleTimeoutMinutes
 	}
@@ -329,13 +416,13 @@ func (c *Config) validateSession() error {
 		return fmt.Errorf("session.absolute_timeout_minutes must be 30..1440, got %d", s.AbsoluteTimeoutMinutes)
 	}
 	if s.ExpiredAction == "" {
-		s.ExpiredAction = ExpiredActionRetryBind
+		s.ExpiredAction = ExpiredActionRedirectLogin
 	}
 	switch s.ExpiredAction {
-	case ExpiredActionRetryBind, ExpiredActionRedirectLogin:
+	case ExpiredActionRedirectLogin:
 	default:
-		return fmt.Errorf("session.expired_action must be %q or %q, got %q",
-			ExpiredActionRetryBind, ExpiredActionRedirectLogin, s.ExpiredAction)
+		return fmt.Errorf("session.expired_action must be %q, got %q (retry_bind was removed; expired sessions redirect to /login)",
+			ExpiredActionRedirectLogin, s.ExpiredAction)
 	}
 	if s.DBPath == "" {
 		s.DBPath = DefaultSessionDBPath

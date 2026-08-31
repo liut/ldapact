@@ -56,6 +56,10 @@ const (
 	SessionAbsoluteTimeoutMinutesEnv = "LDAPADM_ABSOLUTE_TIMEOUT_MINUTES"
 	SessionExpiredActionEnv          = "LDAPADM_EXPIRED_ACTION"
 	SessionDBPathEnv                 = "LDAPADM_DB_PATH"
+	SessionStoreEnv                  = "LDAPADM_SESSION_STORE"
+	RedisURLEnv                      = "LDAPADM_REDIS_URL"
+	RedisDBEnv                       = "LDAPADM_REDIS_DB"
+	ServersEnv                       = "LDAPADM_SERVERS"
 )
 
 // setEnv sets several env vars for the duration of the test.
@@ -68,9 +72,10 @@ func setEnv(t *testing.T, vars map[string]string) {
 
 func minimalEnv() map[string]string {
 	return map[string]string{
-		URLEnv:    "ldap://127.0.0.1:389",
-		BaseDNEnv: "dc=example,dc=com",
-		BindDNEnv: "cn=admin,dc=example,dc=com",
+		URLEnv:      "ldap://127.0.0.1:389",
+		BaseDNEnv:   "dc=example,dc=com",
+		BindDNEnv:   "cn=admin,dc=example,dc=com",
+		RedisURLEnv: "redis://127.0.0.1:6379",
 	}
 }
 
@@ -113,8 +118,14 @@ func TestLoadMinimalEnvDefaults(t *testing.T) {
 	if cfg.Session.AbsoluteTimeoutMinutes != DefaultAbsoluteTimeoutHours*60 {
 		t.Errorf("session.absolute_timeout_minutes = %d, want %d", cfg.Session.AbsoluteTimeoutMinutes, DefaultAbsoluteTimeoutHours*60)
 	}
-	if cfg.Session.ExpiredAction != ExpiredActionRetryBind {
-		t.Errorf("session.expired_action = %q, want %q", cfg.Session.ExpiredAction, ExpiredActionRetryBind)
+	if cfg.Session.ExpiredAction != ExpiredActionRedirectLogin {
+		t.Errorf("session.expired_action = %q, want %q", cfg.Session.ExpiredAction, ExpiredActionRedirectLogin)
+	}
+	if cfg.Session.Store != DefaultSessionStore {
+		t.Errorf("session.store = %q, want %q", cfg.Session.Store, DefaultSessionStore)
+	}
+	if cfg.Session.RedisURL != "redis://127.0.0.1:6379" {
+		t.Errorf("session.redis_url = %q", cfg.Session.RedisURL)
 	}
 	if cfg.Session.DBPath != resolveSessionDBPath(DefaultSessionDBPath) {
 		t.Errorf("session.db_path = %q, want %q", cfg.Session.DBPath, resolveSessionDBPath(DefaultSessionDBPath))
@@ -141,6 +152,8 @@ func TestLoadFullEnv(t *testing.T) {
 		SessionAbsoluteTimeoutMinutesEnv: "720",
 		SessionExpiredActionEnv:          "redirect_to_login",
 		SessionDBPathEnv:                 "/tmp/ldapact-sessions.db",
+		SessionStoreEnv:                  "bbolt",
+		RedisDBEnv:                       "3",
 		LogLevelEnv:                      "debug",
 		TemplatesDirEnv:                  "/etc/ldapact/templates",
 	})
@@ -187,6 +200,12 @@ func TestLoadFullEnv(t *testing.T) {
 	if cfg.Session.ExpiredAction != ExpiredActionRedirectLogin {
 		t.Errorf("expired_action = %q", cfg.Session.ExpiredAction)
 	}
+	if cfg.Session.Store != SessionStoreBbolt {
+		t.Errorf("session.store = %q, want bbolt", cfg.Session.Store)
+	}
+	if cfg.Session.RedisDB != 3 {
+		t.Errorf("redis_db = %d, want 3", cfg.Session.RedisDB)
+	}
 	if cfg.Session.DBPath != "/tmp/ldapact-sessions.db" {
 		t.Errorf("db_path = %q", cfg.Session.DBPath)
 	}
@@ -202,10 +221,11 @@ func TestLoadShippedEnvNames(t *testing.T) {
 	// R6 regression: the four env names shipped before this migration are
 	// unchanged.
 	setEnv(t, map[string]string{
-		ListenEnv: "127.0.0.1:9999",
-		URLEnv:    "ldap://127.0.0.1:389",
-		BaseDNEnv: "dc=shipped,dc=com",
-		BindDNEnv: "cn=admin,dc=shipped,dc=com",
+		ListenEnv:   "127.0.0.1:9999",
+		URLEnv:      "ldap://127.0.0.1:389",
+		BaseDNEnv:   "dc=shipped,dc=com",
+		BindDNEnv:   "cn=admin,dc=shipped,dc=com",
+		RedisURLEnv: "redis://127.0.0.1:6379",
 	})
 	cfg, err := Load()
 	if err != nil {
@@ -241,6 +261,8 @@ func TestLoadEmptyStringEnvUsesDefaults(t *testing.T) {
 		PasswordSchemeEnv:       "",
 		SessionExpiredActionEnv: "",
 		SessionDBPathEnv:        "",
+		SessionStoreEnv:         "",
+		RedisURLEnv:             "redis://127.0.0.1:6379",
 		LogLevelEnv:             "",
 		TemplatesDirEnv:         "",
 	})
@@ -266,8 +288,11 @@ func TestLoadEmptyStringEnvUsesDefaults(t *testing.T) {
 	if cfg.LDAP.PasswordScheme != "" {
 		t.Errorf("password_scheme = %q, want empty", cfg.LDAP.PasswordScheme)
 	}
-	if cfg.Session.ExpiredAction != ExpiredActionRetryBind {
+	if cfg.Session.ExpiredAction != ExpiredActionRedirectLogin {
 		t.Errorf("session.expired_action = %q, want default", cfg.Session.ExpiredAction)
+	}
+	if cfg.Session.Store != DefaultSessionStore {
+		t.Errorf("session.store = %q, want default redis", cfg.Session.Store)
 	}
 	if cfg.Session.DBPath != resolveSessionDBPath(DefaultSessionDBPath) {
 		t.Errorf("session.db_path = %q, want default %q", cfg.Session.DBPath, resolveSessionDBPath(DefaultSessionDBPath))
@@ -294,6 +319,7 @@ func TestLoadEmptyIntBoolEnvParseErrors(t *testing.T) {
 		{"password plain override", PasswordPlainOverrideEnv},
 		{"idle timeout", SessionTimeoutMinutesEnv},
 		{"absolute timeout", SessionAbsoluteTimeoutMinutesEnv},
+		{"redis db", RedisDBEnv},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -403,6 +429,7 @@ func TestValidateStartTLSExplicitFalse(t *testing.T) {
 		BaseDNEnv:      "dc=example,dc=com",
 		BindDNEnv:      "cn=admin,dc=example,dc=com",
 		TLSStartTLSEnv: "false",
+		RedisURLEnv:    "redis://127.0.0.1:6379",
 	})
 	cfg, err := Load()
 	if err != nil {
@@ -454,6 +481,14 @@ func TestLoadValidationErrors(t *testing.T) {
 		{"absolute timeout too large", map[string]string{SessionAbsoluteTimeoutMinutesEnv: "9999"}, "absolute_timeout_minutes"},
 		{"expired action invalid", map[string]string{SessionExpiredActionEnv: "explode"}, "expired_action"},
 		{"password scheme invalid", map[string]string{PasswordSchemeEnv: "ROT13"}, "password_scheme"},
+		{"expired action retry_bind removed", map[string]string{SessionExpiredActionEnv: "retry_bind"}, "retry_bind"},
+		{"session store invalid", map[string]string{SessionStoreEnv: "sqlite"}, "session.store"},
+		{"redis store without url", map[string]string{SessionStoreEnv: "redis", RedisURLEnv: ""}, "redis_url"},
+		{"redis url bad scheme", map[string]string{SessionStoreEnv: "redis", RedisURLEnv: "http://127.0.0.1:6379"}, "redis_url"},
+		{"servers and url conflict", map[string]string{ServersEnv: "ldap://a.example:389"}, "mutually exclusive"},
+		{"invalid replica url", map[string]string{URLEnv: "", ServersEnv: "http://a.example:389"}, "servers"},
+		{"empty replica element", map[string]string{URLEnv: "", ServersEnv: "ldap://a.example:389,,"}, "servers"},
+		{"no url and no servers", map[string]string{URLEnv: ""}, "required"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -474,10 +509,11 @@ func TestLoadUnprefixedVarsIgnored(t *testing.T) {
 	// When the prefixed key is present it wins; the bare name is inert
 	// because envconfig's unprefixed fallback never triggers.
 	setEnv(t, map[string]string{
-		URLEnv:    "ldap://127.0.0.1:389",
-		BaseDNEnv: "dc=example,dc=com",
-		BindDNEnv: "cn=admin,dc=example,dc=com",
-		"URL":     "ldaps://wrong.example.com:636",
+		URLEnv:      "ldap://127.0.0.1:389",
+		BaseDNEnv:   "dc=example,dc=com",
+		BindDNEnv:   "cn=admin,dc=example,dc=com",
+		"URL":       "ldaps://wrong.example.com:636",
+		RedisURLEnv: "redis://127.0.0.1:6379",
 	})
 	cfg, err := Load()
 	if err != nil {
@@ -493,9 +529,10 @@ func TestLoadBareNameFallback(t *testing.T) {
 	// the prefixed key is missing (documented library behavior); the value
 	// is read as-is.
 	setEnv(t, map[string]string{
-		BaseDNEnv: "dc=example,dc=com",
-		BindDNEnv: "cn=admin,dc=example,dc=com",
-		"URL":     "ldap://bare.example.com:389",
+		BaseDNEnv:   "dc=example,dc=com",
+		BindDNEnv:   "cn=admin,dc=example,dc=com",
+		"URL":       "ldap://bare.example.com:389",
+		RedisURLEnv: "redis://127.0.0.1:6379",
 	})
 	cfg, err := Load()
 	if err != nil {
@@ -534,11 +571,13 @@ func TestLoadIgnoresSecretVars(t *testing.T) {
 	// them later. Load must succeed with the secret vars present and leave
 	// the runtime fields empty.
 	setEnv(t, map[string]string{
-		URLEnv:                "ldap://127.0.0.1:389",
-		BaseDNEnv:             "dc=example,dc=com",
-		BindDNEnv:             "cn=admin,dc=example,dc=com",
-		BindPasswordEnv:       "s3cr3t",
-		AutoNumberPasswordEnv: "auto-s3cr3t",
+		URLEnv:           "ldap://127.0.0.1:389",
+		BaseDNEnv:        "dc=example,dc=com",
+		BindDNEnv:        "cn=admin,dc=example,dc=com",
+		RedisURLEnv:      "redis://127.0.0.1:6379",
+		BindPasswordEnv:  "s3cr3t",
+		SessionKeyEnv:    "a2V5LWtleS1rZXkta2V5LWtleQ==",
+		RedisPasswordEnv: "redis-s3cr3t",
 	})
 	cfg, err := Load()
 	if err != nil {
@@ -549,6 +588,12 @@ func TestLoadIgnoresSecretVars(t *testing.T) {
 	}
 	if cfg.AutoNumberPassword != "" {
 		t.Errorf("auto-number password parsed by envconfig: %q", cfg.AutoNumberPassword)
+	}
+	if cfg.SessionKey != "" {
+		t.Errorf("session key parsed by envconfig: %q", cfg.SessionKey)
+	}
+	if cfg.RedisPassword != "" {
+		t.Errorf("redis password parsed by envconfig: %q", cfg.RedisPassword)
 	}
 }
 
@@ -586,6 +631,10 @@ func TestEnvTagsMatchConstants(t *testing.T) {
 		"SessionAbsoluteTimeoutMinutes": SessionAbsoluteTimeoutMinutesEnv,
 		"SessionExpiredAction":          SessionExpiredActionEnv,
 		"SessionDBPath":                 SessionDBPathEnv,
+		"SessionStore":                  SessionStoreEnv,
+		"RedisURL":                      RedisURLEnv,
+		"RedisDB":                       RedisDBEnv,
+		"Servers":                       ServersEnv,
 	}
 	typ := reflect.TypeOf(envFields{})
 	for field, env := range want {
@@ -610,6 +659,8 @@ func TestUsageIncludesContract(t *testing.T) {
 	for _, want := range []string{
 		"LDAPADM_LISTEN", "LDAPADM_URL", "LDAPADM_PASSWORD_SCHEME",
 		"LDAPADM_TIMEOUT_MINUTES", "LDAPADM_DB_PATH",
+		"LDAPADM_SESSION_STORE", "LDAPADM_REDIS_URL", "LDAPADM_REDIS_DB",
+		"LDAPADM_SERVERS",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("usage output missing %s", want)
@@ -767,16 +818,25 @@ func TestSecretFingerprint(t *testing.T) {
 }
 
 func TestResolveSecrets(t *testing.T) {
-	t.Setenv(BindPasswordEnv, "bind-secret")
+	t.Setenv(SessionKeyEnv, "a2V5LWtleS1rZXkta2V5LWtleQ==")
+	t.Setenv(BindPasswordEnv, "bind-secret") // deprecated: must be ignored
+	t.Setenv(RedisPasswordEnv, "redis-secret")
 	t.Setenv(AutoNumberPasswordEnv, "auto-secret")
 
 	cfg := &Config{}
+	cfg.Session.Store = SessionStoreRedis
 	cfg.LDAP.AutoNumberDN = ""
 	if err := cfg.ResolveSecrets(); err != nil {
 		t.Fatalf("ResolveSecrets: %v", err)
 	}
-	if cfg.BindPassword != "bind-secret" {
-		t.Errorf("bind password = %q", cfg.BindPassword)
+	if cfg.SessionKey != "a2V5LWtleS1rZXkta2V5LWtleQ==" {
+		t.Errorf("session key = %q", cfg.SessionKey)
+	}
+	if cfg.BindPassword != "" {
+		t.Errorf("deprecated bind password still resolved: %q", cfg.BindPassword)
+	}
+	if cfg.RedisPassword != "redis-secret" {
+		t.Errorf("redis password = %q", cfg.RedisPassword)
 	}
 	if cfg.AutoNumberPassword != "" {
 		t.Errorf("auto-number password resolved without auto_number_dn: %q", cfg.AutoNumberPassword)
@@ -791,15 +851,82 @@ func TestResolveSecrets(t *testing.T) {
 	}
 }
 
-func TestResolveSecretsBindMissing(t *testing.T) {
-	t.Setenv(BindPasswordEnv, "")
-	t.Setenv(BindPasswordEnv+"_FILE", "")
+func TestResolveSecretsSessionKeyMissing(t *testing.T) {
+	t.Setenv(SessionKeyEnv, "")
+	t.Setenv(SessionKeyEnv+"_FILE", "")
 	origOpen := openTTY
 	defer func() { openTTY = origOpen }()
 	openTTY = func() (io.ReadWriteCloser, error) { return nil, os.ErrNotExist }
-	cfg := &Config{}
+	cfg := &Config{Session: SessionConfig{Store: SessionStoreBbolt}}
 	if err := cfg.ResolveSecrets(); err == nil {
-		t.Fatal("want bind-secret resolution failure")
+		t.Fatal("want session-key resolution failure")
+	}
+}
+
+func TestResolveSecretsRedisPasswordOptional(t *testing.T) {
+	// Redis without auth: no env var, no file reference, no TTY prompt — the
+	// optional resolver must return empty without failing.
+	t.Setenv(SessionKeyEnv, "a2V5LWtleS1rZXkta2V5LWtleQ==")
+	t.Setenv(RedisPasswordEnv, "")
+	t.Setenv(RedisPasswordEnv+"_FILE", "")
+	origOpen := openTTY
+	defer func() { openTTY = origOpen }()
+	openTTY = func() (io.ReadWriteCloser, error) {
+		t.Fatal("optional redis password must not prompt on TTY")
+		return nil, os.ErrNotExist
+	}
+	cfg := &Config{}
+	cfg.Session.Store = SessionStoreRedis
+	if err := cfg.ResolveSecrets(); err != nil {
+		t.Fatalf("ResolveSecrets: %v", err)
+	}
+	if cfg.RedisPassword != "" {
+		t.Errorf("redis password = %q, want empty", cfg.RedisPassword)
+	}
+}
+
+func TestLoadServersOnly(t *testing.T) {
+	setEnv(t, map[string]string{
+		ServersEnv:      "ldap://a.example:389,ldap://b.example:389",
+		BaseDNEnv:       "dc=example,dc=com",
+		BindDNEnv:       "cn=admin,dc=example,dc=com",
+		RedisURLEnv:     "redis://127.0.0.1:6379",
+		SessionStoreEnv: "bbolt",
+	})
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.LDAP.Servers) != 2 {
+		t.Fatalf("servers = %v, want 2 entries", cfg.LDAP.Servers)
+	}
+	if cfg.LDAP.Servers[0] != "ldap://a.example:389" || cfg.LDAP.Servers[1] != "ldap://b.example:389" {
+		t.Errorf("servers = %v", cfg.LDAP.Servers)
+	}
+	if cfg.LDAP.URL != "" {
+		t.Errorf("url should stay empty with servers set, got %q", cfg.LDAP.URL)
+	}
+	if cfg.LDAP.TLS.StartTLS == nil || !*cfg.LDAP.TLS.StartTLS {
+		t.Error("start_tls should default to true for ldap:// replicas")
+	}
+}
+
+func TestLoadMemoryStoreIgnoresRedis(t *testing.T) {
+	setEnv(t, map[string]string{
+		URLEnv:          "ldap://127.0.0.1:389",
+		BaseDNEnv:       "dc=example,dc=com",
+		BindDNEnv:       "cn=admin,dc=example,dc=com",
+		SessionStoreEnv: "memory",
+	})
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Session.Store != SessionStoreMemory {
+		t.Errorf("session.store = %q", cfg.Session.Store)
+	}
+	if cfg.Session.RedisURL != "" {
+		t.Errorf("redis_url = %q, want empty for memory store", cfg.Session.RedisURL)
 	}
 }
 
