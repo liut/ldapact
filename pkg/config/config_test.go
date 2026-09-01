@@ -126,8 +126,41 @@ func TestLoadMinimalEnvDefaults(t *testing.T) {
 	if cfg.Session.RedisURL != "redis://127.0.0.1:6379" {
 		t.Errorf("session.redis_url = %q", cfg.Session.RedisURL)
 	}
+	if cfg.SessionStoreExplicit {
+		t.Error("session store was defaulted, SessionStoreExplicit must be false")
+	}
 	if cfg.Session.DBPath != resolveSessionDBPath(DefaultSessionDBPath) {
 		t.Errorf("session.db_path = %q, want %q", cfg.Session.DBPath, resolveSessionDBPath(DefaultSessionDBPath))
+	}
+}
+
+func TestLoadDefaultRedisWithoutURLFallsBackToMemory(t *testing.T) {
+	setEnv(t, map[string]string{
+		URLEnv:    "ldap://127.0.0.1:389",
+		BaseDNEnv: "dc=example,dc=com",
+		BindDNEnv: "cn=admin,dc=example,dc=com",
+	})
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Session.Store != SessionStoreMemory {
+		t.Errorf("session.store = %q, want memory (defaulted redis with no Redis URL)", cfg.Session.Store)
+	}
+	if cfg.SessionStoreExplicit {
+		t.Error("SessionStoreExplicit must be false for a defaulted store")
+	}
+}
+
+func TestLoadExplicitStoreFlag(t *testing.T) {
+	setEnv(t, minimalEnv())
+	t.Setenv(SessionStoreEnv, "memory")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.SessionStoreExplicit {
+		t.Error("explicit SESSION_STORE must set SessionStoreExplicit")
 	}
 }
 

@@ -40,7 +40,7 @@ custom creation templates keep working, and renders the UI with Go
 make build            # CGO_ENABLED=0 single binary -> bin/ldapact
 make dist             # cross-platform release binaries under dist/
 make test             # unit + integration tests (integration skips when no backend detected)
-make test-integration # end-to-end F1-F8 vs the detected backend
+make test-integration # unit + gated integration tests (LDAP/Redis backends, incl. F1-F8)
 make test-js          # node test/js/*_test.js
 make lint             # gofmt + go vet + golangci-lint + govulncheck
 make tools            # install golangci-lint + govulncheck (lint prerequisites)

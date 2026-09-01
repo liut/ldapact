@@ -6,9 +6,12 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -118,7 +121,7 @@ func run(args []string) int {
 		return 1
 	}
 
-	sessionStore, err := newSessionStore(ctx, cfg)
+	sessionStore, err := newSessionStore(ctx, cfg, logger)
 	if err != nil {
 		logger.Error("session store failed to open", "event", "session.store_open_failed", "error", err)
 		return 1
@@ -162,20 +165,45 @@ func run(args []string) int {
 
 // newSessionStore builds the configured session backend (R1/U8): Redis
 // (default), bbolt (non-default compatibility), or memory. Redis and bbolt
-// fail fast when their backing store is unreachable/invalid.
-func newSessionStore(ctx context.Context, cfg *config.Config) (session.Store, error) {
+// fail fast when their backing store is unreachable/invalid — except when
+// the redis store was defaulted (not explicitly configured) and the Redis
+// URL is empty or points at a loopback host (localhost/127.*/::1): those
+// dev-shaped configurations fall back to the in-memory store with a warning
+// instead of refusing to start.
+func newSessionStore(ctx context.Context, cfg *config.Config, logger *slog.Logger) (session.Store, error) {
 	idle := time.Duration(cfg.Session.TimeoutMinutes) * time.Minute
 	absolute := time.Duration(cfg.Session.AbsoluteTimeoutMinutes) * time.Minute
 	switch cfg.Session.Store {
 	case config.SessionStoreRedis:
-		return session.NewRedisStore(ctx, session.RedisOptions{
+		store, err := session.NewRedisStore(ctx, session.RedisOptions{
 			URL:      cfg.Session.RedisURL,
 			Password: cfg.RedisPassword,
 			DB:       cfg.Session.RedisDB,
 		}, idle, absolute)
+		if err != nil && !cfg.SessionStoreExplicit &&
+			(cfg.Session.RedisURL == "" || isLoopbackRedisURL(cfg.Session.RedisURL)) {
+			logger.Warn("Redis unavailable; using in-memory session store",
+				"event", "session.redis_fallback_memory",
+				"redis_url", cfg.Session.RedisURL,
+				"error", err)
+			return session.NewMemoryStore(idle, absolute), nil
+		}
+		return store, err
 	case config.SessionStoreMemory:
 		return session.NewMemoryStore(idle, absolute), nil
 	default: // bbolt (R17): LDAPADM_DB_PATH applies here.
 		return session.NewStore(cfg.Session.DBPath, idle, absolute)
 	}
+}
+
+// isLoopbackRedisURL reports whether the Redis URL targets the local
+// machine (localhost, 127.*, or ::1) — the only shapes eligible for the
+// memory-store fallback.
+func isLoopbackRedisURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	return host == "localhost" || host == "::1" || strings.HasPrefix(host, "127.")
 }

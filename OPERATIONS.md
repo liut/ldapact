@@ -49,6 +49,15 @@ encrypted with AES-256-GCM under `LDAPADM_SESSION_KEY`; idle + absolute
 timeouts, rotation on state changes, and invalidation on logout work the same
 on every backend.
 
+**Dev fallback:** when `LDAPADM_SESSION_STORE` is left at the default and
+Redis is not configured at all (no `LDAPADM_REDIS_URL`), or the configured
+Redis is loopback-only (`localhost`, `127.*`, `::1`) and unreachable, the
+server starts with the in-memory store and logs
+`event=session.redis_fallback_memory`. This keeps dev startup friction-free;
+it does not apply to an explicitly configured `redis` store or a remote
+Redis URL — those stay fail-fast, because silently degrading multi-instance
+session sharing hides real configuration problems.
+
 ### Redis (default, multi-instance)
 
 - Keys are `ldapa_sess:<id>`; the value is the JSON session record. A sliding

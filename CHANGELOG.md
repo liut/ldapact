@@ -3,6 +3,20 @@
 All notable changes to ldapact v1 are tracked here, one entry per implementation
 unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
 
+## Redis-to-memory fallback + Makefile sync (2026-09-01)
+
+- `feat(config)` — when `LDAPADM_SESSION_STORE` is left at the default and
+  Redis is not configured (empty URL) or only a loopback Redis
+  (`localhost`/`127.*`/`::1`) is unreachable, the store falls back to
+  `memory` (logged as `event=session.redis_fallback_memory`). An explicitly
+  configured `redis` store or a remote Redis URL stays fail-fast. Config
+  gains `SessionStoreExplicit` to distinguish defaulted vs explicit choice.
+- `chore(Makefile)` — `make test-integration` now runs the gated integration
+  tests in `internal/app`, `pkg/authn`, `pkg/entry`, `pkg/ldapx`, `pkg/ldif`,
+  `pkg/session`, and `pkg/tree` in addition to the F1-F8 flows; `make run`
+  documents the memory fallback. README/OPERATIONS/.env.example/AGENTS.md
+  synced.
+
 ## Secret resolution without TTY prompt (2026-09-01)
 
 - `refactor(config)` — ldapact is a server process, so secret resolution no

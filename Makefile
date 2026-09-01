@@ -3,6 +3,10 @@ BIN := bin/ldapact
 VERSION ?= dev
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 SOURCES := $(shell find cmd pkg -type f -name '*.go' ! -name '*_test.go')
+# Packages carrying gated integration tests (LDAP/Redis test backends; each
+# skips when no backend is available, mirroring internal/testldap).
+TEST_PKGS := ./test/integration/... ./internal/app/ ./pkg/authn/ ./pkg/entry/ \
+	./pkg/ldapx/ ./pkg/ldif/ ./pkg/session/ ./pkg/tree/
 # Lint tool versions; pin with GOLANGCI_LINT_VERSION / GOVULNCHECK_VERSION.
 GOLANGCI_LINT_VERSION ?= v2.13.2
 GOVULNCHECK_VERSION ?= latest
@@ -38,8 +42,10 @@ dist: dist/linux_amd64/ldapact dist/darwin_amd64/ldapact dist/darwin_arm64/ldapa
 test:
 	$(GO) test ./...
 
+# Unit + gated integration tests: end-to-end F1-F8 flows, the login gate,
+# replica failover, and the Redis session backend (cross-instance sharing).
 test-integration:
-	$(GO) test -timeout 15m -count=1 ./test/integration/...
+	$(GO) test -timeout 15m -count=1 $(TEST_PKGS)
 
 test-js:
 	node test/js/autofill_test.js
@@ -65,6 +71,9 @@ govulncheck:
 	@if command -v govulncheck >/dev/null 2>&1; then govulncheck ./...; else echo "govulncheck not installed — run: make tools (skipping)"; fi
 
 run:
+	# Needs LDAPADM_* env (see README "Configuration"). With the default
+	# session store, a missing or unreachable local Redis falls back to
+	# memory so dev startup stays friction-free.
 	$(GO) run ./cmd/ldapact
 
 clean:

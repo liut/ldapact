@@ -88,7 +88,7 @@ reference (with descriptions) from the struct tags.
 | `LDAPADM_TIMEOUT_MINUTES` | `30` | idle, 5..240 |
 | `LDAPADM_ABSOLUTE_TIMEOUT_MINUTES` | `480` | absolute, 30..1440 |
 | `LDAPADM_EXPIRED_ACTION` | `redirect_to_login` | expired sessions redirect to `/login` (`retry_bind` was removed) |
-| `LDAPADM_SESSION_STORE` | `redis` | `redis` \| `bbolt` \| `memory`; redis is shared across instances, bbolt/memory are single-instance |
+| `LDAPADM_SESSION_STORE` | `redis` | `redis` \| `bbolt` \| `memory`; redis is shared across instances, bbolt/memory are single-instance. When left at the default and Redis is not configured (empty URL) or only a loopback Redis (`localhost`/`127.*`/`::1`) is unreachable, the store falls back to `memory`; an explicit `redis` or a remote Redis URL stays fail-fast |
 | `LDAPADM_REDIS_URL` | — (required when store=redis) | `redis://host:port` or `rediss://host:port` (TLS verification mandatory) |
 | `LDAPADM_REDIS_DB` | `0` | Redis logical database |
 | `LDAPADM_DB_PATH` | `/var/lib/ldapact/sessions.db` | bbolt only: unset or set to the default: falls back to `~/.local/state/ldapact/sessions.db` when `/var/lib/ldapact` does not exist |

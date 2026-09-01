@@ -24,11 +24,15 @@ func testSessionCfg() *config.Config {
 	}
 }
 
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
 func TestNewSessionStoreMemoryIgnoresDBPath(t *testing.T) {
 	cfg := testSessionCfg()
 	cfg.Session.Store = config.SessionStoreMemory
 	cfg.Session.DBPath = "/definitely/not/used/sessions.db"
-	s, err := newSessionStore(context.Background(), cfg)
+	s, err := newSessionStore(context.Background(), cfg, discardLogger())
 	if err != nil {
 		t.Fatalf("newSessionStore(memory): %v", err)
 	}
@@ -45,7 +49,7 @@ func TestNewSessionStoreBboltUsesDBPath(t *testing.T) {
 	cfg := testSessionCfg()
 	cfg.Session.Store = config.SessionStoreBbolt
 	cfg.Session.DBPath = t.TempDir() + "/sessions.db"
-	s, err := newSessionStore(context.Background(), cfg)
+	s, err := newSessionStore(context.Background(), cfg, discardLogger())
 	if err != nil {
 		t.Fatalf("newSessionStore(bbolt): %v", err)
 	}
@@ -56,7 +60,7 @@ func TestNewSessionStoreBboltUsesDBPath(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := newSessionStore(context.Background(), cfg)
+	reopened, err := newSessionStore(context.Background(), cfg, discardLogger())
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -69,9 +73,51 @@ func TestNewSessionStoreBboltUsesDBPath(t *testing.T) {
 func TestNewSessionStoreRedisUnreachableFails(t *testing.T) {
 	cfg := testSessionCfg()
 	cfg.Session.Store = config.SessionStoreRedis
-	cfg.Session.RedisURL = "redis://127.0.0.1:1" // closed port: fail-fast
-	if _, err := newSessionStore(context.Background(), cfg); err == nil {
+	cfg.SessionStoreExplicit = true // explicit redis stays fail-fast
+	cfg.Session.RedisURL = "redis://redis.invalid:6379"
+	if _, err := newSessionStore(context.Background(), cfg, discardLogger()); err == nil {
 		t.Fatal("want fail-fast error when Redis is unreachable")
+	}
+}
+
+func TestNewSessionStoreRedisLoopbackFallback(t *testing.T) {
+	cfg := testSessionCfg()
+	cfg.Session.Store = config.SessionStoreRedis // defaulted, not explicit
+	cfg.Session.RedisURL = "redis://127.0.0.1:1" // closed loopback port
+	s, err := newSessionStore(context.Background(), cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("loopback Redis down must fall back to memory, got %v", err)
+	}
+	defer s.Close()
+	if _, ok := s.(*session.MemoryStore); !ok {
+		t.Fatalf("fallback store type = %T, want *session.MemoryStore", s)
+	}
+	if _, err := s.Create("id", "p", "srv", nil); err != nil {
+		t.Fatalf("Create on fallback store: %v", err)
+	}
+}
+
+func TestNewSessionStoreRedisEmptyURLFallback(t *testing.T) {
+	cfg := testSessionCfg()
+	cfg.Session.Store = config.SessionStoreRedis // defaulted
+	// No Redis URL at all: fall back to memory (config.Load also does this
+	// at validation time; this covers direct construction).
+	s, err := newSessionStore(context.Background(), cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("empty Redis URL must fall back to memory, got %v", err)
+	}
+	defer s.Close()
+	if _, ok := s.(*session.MemoryStore); !ok {
+		t.Fatalf("fallback store type = %T, want *session.MemoryStore", s)
+	}
+}
+
+func TestNewSessionStoreRedisRemoteFailsFast(t *testing.T) {
+	cfg := testSessionCfg()
+	cfg.Session.Store = config.SessionStoreRedis        // defaulted
+	cfg.Session.RedisURL = "redis://redis.invalid:6379" // remote: no fallback
+	if _, err := newSessionStore(context.Background(), cfg, discardLogger()); err == nil {
+		t.Fatal("remote Redis unreachable must fail fast (no memory fallback)")
 	}
 }
 

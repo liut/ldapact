@@ -173,6 +173,13 @@ type Config struct {
 	LogLevel     string
 	TemplatesDir string
 
+	// SessionStoreExplicit is true when LDAPADM_SESSION_STORE was explicitly
+	// configured. The defaulted redis store falls back to memory when Redis
+	// is not configured at all (empty URL) or a loopback Redis
+	// (localhost/127.*/::1) is unreachable; an explicit redis store stays
+	// fail-fast.
+	SessionStoreExplicit bool
+
 	// SessionKey and RedisPassword are runtime-only values filled by
 	// ResolveSecrets; they are never parsed from the environment.
 	SessionKey         string
@@ -259,6 +266,7 @@ func (e envFields) toConfig() Config {
 	c.Session.RedisURL = e.RedisURL
 	c.Session.RedisDB = e.RedisDB
 	c.LDAP.Servers = e.Servers
+	c.SessionStoreExplicit = e.SessionStore != ""
 	c.LogLevel = e.LogLevel
 	c.TemplatesDir = e.TemplatesDir
 	return c
@@ -393,6 +401,11 @@ func (c *Config) validateSession() error {
 	case SessionStoreRedis, SessionStoreBbolt, SessionStoreMemory:
 	default:
 		return fmt.Errorf("session.store must be redis|bbolt|memory, got %q", s.Store)
+	}
+	if s.Store == SessionStoreRedis && s.RedisURL == "" && !c.SessionStoreExplicit {
+		// Dev ergonomics: the defaulted redis store with no Redis configured
+		// at all falls back to the in-memory store (single instance).
+		s.Store = SessionStoreMemory
 	}
 	if s.RedisURL != "" {
 		u, err := url.Parse(s.RedisURL)
