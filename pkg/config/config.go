@@ -173,6 +173,11 @@ type Config struct {
 	LogLevel     string
 	TemplatesDir string
 
+	// TrustProxy enables X-Forwarded-For keying for the rate limiters.
+	// Enable only behind a reverse proxy that overwrites that header;
+	// otherwise attackers can spoof it to rotate their limit key.
+	TrustProxy bool
+
 	// SessionStoreExplicit is true when LDAPADM_SESSION_STORE was explicitly
 	// configured. The defaulted redis store falls back to memory when Redis
 	// is not configured at all (empty URL) or a loopback Redis
@@ -223,6 +228,7 @@ type envFields struct {
 	RedisURL     string   `envconfig:"REDIS_URL" desc:"Redis server URL: redis://host:port or rediss://host:port (required when SESSION_STORE=redis)"`
 	RedisDB      int      `envconfig:"REDIS_DB" desc:"Redis database number (default 0)"`
 	Servers      []string `envconfig:"SERVERS" desc:"comma-separated LDAP replica URLs (mutually exclusive with URL)"`
+	TrustProxy   *bool    `envconfig:"TRUST_PROXY" desc:"key rate limits by X-Forwarded-For when behind a trusted reverse proxy (default false)"`
 }
 
 // Load reads, defaults, and validates the server profile from LDAPADM_*
@@ -266,6 +272,7 @@ func (e envFields) toConfig() Config {
 	c.Session.RedisURL = e.RedisURL
 	c.Session.RedisDB = e.RedisDB
 	c.LDAP.Servers = e.Servers
+	c.TrustProxy = e.TrustProxy != nil && *e.TrustProxy
 	c.SessionStoreExplicit = e.SessionStore != ""
 	c.LogLevel = e.LogLevel
 	c.TemplatesDir = e.TemplatesDir

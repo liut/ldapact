@@ -95,6 +95,7 @@ reference (with descriptions) from the struct tags.
 | `LDAPADM_SESSION_KEY` | — (required secret) | base64 of 32 bytes; AES-256-GCM key for session bind credentials; changing it invalidates all sessions |
 | `LDAPADM_LOG_LEVEL` | `info` | `debug`\|`info`\|`warn`\|`error` |
 | `LDAPADM_TEMPLATES_DIR` | empty | optional custom XML template directory |
+| `LDAPADM_TRUST_PROXY` | `false` | key rate limits by `X-Forwarded-For` instead of the socket peer; enable only behind a reverse proxy that overwrites that header |
 
 **Secrets are never parsed from the environment or stored in any config
 file.** `LDAPADM_SESSION_KEY` (required) and the optional
@@ -148,8 +149,11 @@ v1 pre-launch checklist.
 - Operations bind per request with the session credential (no shared
   configured password); replica failover on network errors with rotating
   start points, never on `invalidCredentials` (that invalidates the session
-  and redirects to login).
+  and redirects to login). Startup requires at least one replica reachable;
+  replicas that are down at startup are retried in the background and join
+  the rotation when they recover (all replicas down still fails fast).
 - CSRF: SameSite=Strict + Origin-header check on state-changing methods.
+  Login POST is additionally rate limited (2/s, burst 5) per client key.
 - Security headers: CSP (Report-Only initially), HSTS over TLS, nosniff,
   `X-Frame-Options: DENY`, Referrer-Policy, Permissions-Policy.
 - Passwords: write whitelist (SSHA512/SSHA256/SSHA/SHA512/SHA256/

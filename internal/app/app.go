@@ -71,6 +71,11 @@ func NewHandler(d Deps) http.Handler {
 		}
 		loginHandler = authn.NewLogin(d.Store, d.Cipher, d.LDAP, renderer, d.Logger, serverRef, bindDN)
 	}
+	rateKey := ratelimit.RemoteAddrKey
+	if d.Cfg != nil && d.Cfg.TrustProxy {
+		rateKey = ratelimit.ProxyKey
+	}
+	loginLimiter := ratelimit.NewWithKey(2, 5, rateKey)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintln(w, `{"status":"ok"}`)
@@ -88,7 +93,11 @@ func NewHandler(d Deps) http.Handler {
 	})
 	if loginHandler != nil {
 		mux.Handle("GET /login", loginHandler)
-		mux.Handle("POST /login", loginHandler)
+		// Tighter per-key login limiter on top of the app-wide limiter
+		// (2/s refill, burst 5): throttles password guessing without
+		// penalizing normal browsing traffic. Keyed like the global limiter
+		// (RemoteAddr, or X-Forwarded-For when LDAPADM_TRUST_PROXY=true).
+		mux.Handle("POST /login", loginLimiter.Handler(loginHandler))
 		mux.HandleFunc("POST /logout", loginHandler.Logout)
 	}
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(ldapact.Assets())))
@@ -125,7 +134,7 @@ func NewHandler(d Deps) http.Handler {
 	}
 
 	var h http.Handler = mux
-	h = ratelimit.New(60, 120).Handler(h)
+	h = ratelimit.NewWithKey(60, 120, rateKey).Handler(h)
 	h = authn.CSRF(d.Logger)(h)
 	h = authn.Middleware(authn.MiddlewareOptions{Store: d.Store, Cipher: d.Cipher, Logger: d.Logger})(h)
 	h = secheaders.Middleware(h)

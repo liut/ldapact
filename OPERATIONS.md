@@ -103,8 +103,15 @@ rotate their starting replica and fail over to the next on network-level
 errors (bounded at 2 attempts per replica); `invalidCredentials` (49) never
 failovers — the identity is shared across replicas, so a rejected bind means
 the credential is stale and the session is invalidated (redirect to login).
-When every replica is unreachable, the error names each replica's reason
-(look for `ldapx: all replicas failed`).
+Startup requires at least one reachable replica; replicas that are down at
+startup are logged (`event=ldap.replica.down`) and retried on the health
+interval until they recover (`event=ldap.replica.up`). When every replica is
+unreachable, startup fails with an error naming each replica's reason (look
+for `ldapx: all replicas failed at startup`).
+
+Rate limits key on the socket peer by default. Behind a reverse proxy, set
+`LDAPADM_TRUST_PROXY=true` so limits key on the `X-Forwarded-For` first hop
+instead (only when the proxy overwrites that header).
 
 ## Logging and audit (R15/AE6)
 

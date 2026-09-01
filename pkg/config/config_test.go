@@ -59,6 +59,7 @@ const (
 	RedisURLEnv                      = "LDAPADM_REDIS_URL"
 	RedisDBEnv                       = "LDAPADM_REDIS_DB"
 	ServersEnv                       = "LDAPADM_SERVERS"
+	TrustProxyEnv                    = "LDAPADM_TRUST_PROXY"
 )
 
 // setEnv sets several env vars for the duration of the test.
@@ -186,6 +187,7 @@ func TestLoadFullEnv(t *testing.T) {
 		SessionDBPathEnv:                 "/tmp/ldapact-sessions.db",
 		SessionStoreEnv:                  "bbolt",
 		RedisDBEnv:                       "3",
+		TrustProxyEnv:                    "true",
 		LogLevelEnv:                      "debug",
 		TemplatesDirEnv:                  "/etc/ldapact/templates",
 	})
@@ -237,6 +239,9 @@ func TestLoadFullEnv(t *testing.T) {
 	}
 	if cfg.Session.RedisDB != 3 {
 		t.Errorf("redis_db = %d, want 3", cfg.Session.RedisDB)
+	}
+	if !cfg.TrustProxy {
+		t.Error("trust_proxy should be true")
 	}
 	if cfg.Session.DBPath != "/tmp/ldapact-sessions.db" {
 		t.Errorf("db_path = %q", cfg.Session.DBPath)
@@ -667,6 +672,7 @@ func TestEnvTagsMatchConstants(t *testing.T) {
 		"RedisURL":                      RedisURLEnv,
 		"RedisDB":                       RedisDBEnv,
 		"Servers":                       ServersEnv,
+		"TrustProxy":                    TrustProxyEnv,
 	}
 	typ := reflect.TypeOf(envFields{})
 	for field, env := range want {

@@ -167,6 +167,39 @@ func TestLoginGateFlow(t *testing.T) {
 	}
 }
 
+// TestLoginRateLimited verifies the dedicated login limiter (2/s, burst 5)
+// rejects the sixth rapid POST /login with 429 while normal traffic stays
+// unaffected (the global 60/s limiter does not fire).
+func TestLoginRateLimited(t *testing.T) {
+	srv, _, _, cfg, hc := startTestApp(t)
+	var got429 bool
+	for i := 0; i < 6; i++ {
+		resp := loginRequest(t, srv, hc, cfg.LDAP.BindDN, "wrong-password-"+string(rune('a'+i)))
+		code := resp.StatusCode
+		resp.Body.Close()
+		if code == http.StatusTooManyRequests {
+			got429 = true
+			break
+		}
+		if code != http.StatusOK {
+			t.Fatalf("login attempt %d = %d, want 200 (error page) or 429", i, code)
+		}
+	}
+	if !got429 {
+		t.Fatal("rapid login attempts must be rate limited")
+	}
+	// The login limiter only wraps POST /login: GET /login stays reachable
+	// even while the POST bucket is exhausted.
+	resp, err := hc.Get(srv.URL + "/login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("GET /login after throttling = %d, want 200", resp.StatusCode)
+	}
+}
+
 func TestExpiredSessionRedirects(t *testing.T) {
 	srv, inst, store, cfg, hc := startTestApp(t)
 	resp := loginRequest(t, srv, hc, cfg.LDAP.BindDN, inst.AdminPassword)
