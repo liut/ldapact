@@ -18,6 +18,8 @@ func NewID() (string, error) {
 // Rotate migrates a session to a new ID, invalidating the old one (KTD 8:
 // renewal on privilege/state change; AE7 rotation semantics).
 func (s *BboltStore) Rotate(oldID, newID string) (*Value, error) {
+	s.rotateMu.Lock()
+	defer s.rotateMu.Unlock()
 	v, err := s.Get(oldID)
 	if err != nil {
 		return nil, err

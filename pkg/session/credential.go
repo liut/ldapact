@@ -4,7 +4,9 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 )
@@ -101,17 +103,16 @@ func (c *CredentialCipher) Decrypt(envelope []byte) ([]byte, error) {
 	return plain, nil
 }
 
-// KeyFingerprint returns a truncated fingerprint safe for log lines (mirrors
-// config.SecretFingerprint without importing config).
+// KeyFingerprint returns a truncated fingerprint safe for log lines: the
+// first 6 hex characters of the SHA-256 of the key material. Unlike a raw
+// substring of the base64 key, a hash fingerprint reveals nothing about the
+// key itself.
 func (c *CredentialCipher) KeyFingerprint() string { return c.fingerprint }
 
 func credentialFingerprint(s string) string {
-	switch {
-	case s == "":
+	if s == "" {
 		return "[empty]"
-	case len(s) <= 6:
-		return "[redacted]"
-	default:
-		return s[:4] + ".." + s[len(s)-2:]
 	}
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:3])
 }

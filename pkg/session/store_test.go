@@ -3,9 +3,11 @@ package session
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -124,6 +126,46 @@ func TestRotate(t *testing.T) {
 	}
 	if _, err := s.Get(oldID); !errors.Is(err, ErrSessionMissing) {
 		t.Error("old session should be gone")
+	}
+}
+
+func TestBboltConcurrentRotateSingleSurvivor(t *testing.T) {
+	s := newTestStore(t, 30*time.Minute, 8*time.Hour)
+	if _, err := s.Create("old", "p", "srv", []byte("cred")); err != nil {
+		t.Fatal(err)
+	}
+	const n = 12
+	var wg sync.WaitGroup
+	results := make([]error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, results[i] = s.Rotate("old", fmt.Sprintf("new-%d", i))
+		}(i)
+	}
+	wg.Wait()
+	successes := 0
+	for _, err := range results {
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, ErrSessionMissing):
+		default:
+			t.Errorf("unexpected rotate error: %v", err)
+		}
+	}
+	if successes != 1 {
+		t.Errorf("concurrent rotates succeeded %d times, want exactly 1", successes)
+	}
+	live := 0
+	for i := 0; i < n; i++ {
+		if _, err := s.Get(fmt.Sprintf("new-%d", i)); err == nil {
+			live++
+		}
+	}
+	if live != 1 {
+		t.Errorf("live sessions after concurrent rotate = %d, want 1", live)
 	}
 }
 

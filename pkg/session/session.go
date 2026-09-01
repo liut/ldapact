@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"go.etcd.io/bbolt"
@@ -70,6 +71,10 @@ type BboltStore struct {
 	now      func() time.Time
 	idle     time.Duration
 	absolute time.Duration
+	// rotateMu serializes Rotate so concurrent state-changing requests
+	// cannot both read the old session before either deletes it (which
+	// would leave two live sessions).
+	rotateMu sync.Mutex
 }
 
 // newValue stamps a fresh session record with the shared timeout semantics.
