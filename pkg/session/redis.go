@@ -40,6 +40,9 @@ type RedisStore struct {
 	idle     time.Duration
 	absolute time.Duration
 	prefix   string
+	// rotatePersist is a test seam for fault injection of the post-rename
+	// persist step; nil uses the real persist.
+	rotatePersist func(id string, v *Value) error
 }
 
 // NewRedisStore connects to Redis and fails fast when it is unreachable
@@ -149,8 +152,17 @@ func (s *RedisStore) Rotate(oldID, newID string) (*Value, error) {
 	if !moved {
 		return nil, fmt.Errorf("session: redis rotate %s -> %s: target session already exists", oldID, newID)
 	}
-	if err := s.persist(newID, v); err != nil {
-		return nil, err
+	persistFn := s.rotatePersist
+	if persistFn == nil {
+		persistFn = s.persist
+	}
+	if err := persistFn(newID, v); err != nil {
+		// The old key is already gone; restore it so the session survives a
+		// transient Redis failure instead of stranding the user (re-login).
+		if _, rbErr := s.rdb.Rename(context.Background(), newKey, oldKey).Result(); rbErr != nil {
+			return nil, fmt.Errorf("session: redis rotate %s -> %s: persist: %w (rollback failed: %v)", oldID, newID, err, rbErr)
+		}
+		return nil, fmt.Errorf("session: redis rotate %s -> %s: persist: %w (rolled back)", oldID, newID, err)
 	}
 	cp := *v
 	return &cp, nil

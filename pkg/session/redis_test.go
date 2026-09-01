@@ -137,6 +137,26 @@ func TestRedisRotateTargetCollision(t *testing.T) {
 	}
 }
 
+func TestRedisRotatePersistFailureRollsBack(t *testing.T) {
+	s, _ := newTestRedis(t, 30*time.Minute, 8*time.Hour)
+	if _, err := s.Create("old", "p", "srv", []byte("cred")); err != nil {
+		t.Fatal(err)
+	}
+	s.rotatePersist = func(id string, v *Value) error {
+		return errors.New("injected persist failure")
+	}
+	if _, err := s.Rotate("old", "new"); err == nil {
+		t.Fatal("want error when the post-rename persist fails")
+	}
+	s.rotatePersist = nil
+	if _, err := s.Get("old"); err != nil {
+		t.Errorf("old session should survive the rollback, got %v", err)
+	}
+	if _, err := s.Get("new"); !errors.Is(err, ErrSessionMissing) {
+		t.Errorf("new session must not exist after rollback, got %v", err)
+	}
+}
+
 func TestRedisSweepNoop(t *testing.T) {
 	s, _ := newTestRedis(t, 30*time.Minute, 8*time.Hour)
 	removed, err := s.Sweep()
