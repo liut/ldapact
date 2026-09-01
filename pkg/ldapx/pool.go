@@ -24,6 +24,10 @@ type Pool struct {
 	logger *slog.Logger
 }
 
+// dialConn is the dial entry point used by pools. Tests override it to
+// inject fake connections without a real LDAP server.
+var dialConn = Dial
+
 // PoolOptions configures the pool.
 type PoolOptions struct {
 	Size int
@@ -66,7 +70,7 @@ func NewPool(ctx context.Context, opts PoolOptions) (*Pool, error) {
 }
 
 func (p *Pool) newConn(ctx context.Context) (Conn, error) {
-	conn, err := Dial(ctx, p.opts.Dial)
+	conn, err := dialConn(ctx, p.opts.Dial)
 	if err != nil {
 		return nil, err
 	}

@@ -88,3 +88,13 @@ func (c *Client) TreeFilter() string { return c.filter }
 func (c *Client) VerifyBind(ctx context.Context, dn, password string) error {
 	return c.pool.VerifyBind(ctx, dn, password)
 }
+
+// ReplicaCount reports the number of currently active (dialable) replicas.
+// A replica that was unreachable at startup or later is retried in the
+// background and counts here once it recovers.
+func (c *Client) ReplicaCount() int {
+	if c.pool == nil {
+		return 0
+	}
+	return c.pool.Len()
+}

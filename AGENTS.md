@@ -121,8 +121,11 @@ parse failure at startup — don't weaken that.
 
 ### Security invariants (do not weaken)
 
-- Fail-fast startup bind: refuses to start when the directory is unreachable
-  or the certificate is expired.
+- Fail-fast startup: refuses to start when every LDAP replica is
+  unreachable, a replica certificate is expired (fail-closed), or the
+  configured session store is unreachable. At least one reachable replica is
+  sufficient to start; replicas down at startup are retried in the
+  background.
 - TLS 1.2 floor, mandatory verification, StartTLS-only for `ldap://`.
 - Sessions: 256-bit opaque IDs, `__Host-LDAPADM_SID` (Secure/HttpOnly/
   SameSite=Strict), bbolt store, idle + absolute timeouts, rotation on state
