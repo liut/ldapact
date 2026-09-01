@@ -1,7 +1,7 @@
 {{define "form-field.html"}}
 <div class="form-field">
   {{if .Hidden}}{{else}}
-  <label for="f-{{.ID}}">{{.Display}}{{if .Required}} <span aria-hidden="true">*</span>{{end}}{{if .SchemaRequired}} <span class="schema-required">Required (schema)</span>{{end}}</label>
+  <label for="{{if .BinaryUpload}}binfile-{{.ID}}{{else}}f-{{.ID}}{{end}}">{{.Display}}{{if .Required}} <span aria-hidden="true">*</span>{{end}}{{if .SchemaRequired}} <span class="schema-required">Required (schema)</span>{{end}}</label>
   {{if .HelpText}}<p class="field-help" id="help-{{.ID}}">{{.HelpText}}</p>{{end}}
   {{if .Preview}}<img class="media-preview" src="{{.Preview}}" alt="{{.Display}} preview">{{end}}
   {{if .Redacted}}
@@ -9,6 +9,8 @@
     <input type="text" id="f-{{.ID}}" value="[redacted]" readonly>
     <p class="field-help"><a href="{{.PasswordLink}}">Change password</a> — passwords are handled by the password flow.</p>
   </div>
+  {{else if .BinaryUpload}}
+  {{/* Binary attributes are replaced by file upload only; no value input. */}}
   {{else if .Multi}}
   <div class="multi-group" id="f-{{.ID}}-group">
     {{range $i, $v := .MultiValues}}

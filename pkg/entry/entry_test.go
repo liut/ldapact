@@ -175,6 +175,7 @@ func controlSchema() *ldapx.Schema {
 				"( 2.5.4.5 NAME 'booleanAttr' SYNTAX 1.3.6.1.4.1.1466.115.121.1.7 SINGLE-VALUE )",
 				"( 2.5.4.49 NAME 'dnAttr' SYNTAX 1.3.6.1.4.1.1466.115.121.1.12 )",
 				"( 2.5.4.36 NAME 'certificateAttr' SYNTAX 1.3.6.1.4.1.1466.115.121.1.8 )",
+				"( 0.9.2342.19200300.100.1.60 NAME 'jpegPhoto' SYNTAX 1.3.6.1.4.1.1466.115.121.1.28 )",
 				"( 1.3.6.1.4.1.9999.1.1 NAME 'operationalAttr' SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 USAGE directoryOperation )",
 			}},
 		},
@@ -863,11 +864,14 @@ func TestEditFormSchemaControls(t *testing.T) {
 			t.Errorf("DN control missing %q", want)
 		}
 	}
-	// Binary syntax → read-only placeholder.
-	for _, want := range []string{`name="certificateAttr"`, `value="[binary]"`, "readonly"} {
+	// Binary syntax → file-upload replacement only, no text input.
+	for _, want := range []string{`name="binfile_certificateAttr"`, "Replace with file", "Select a file to replace the current value."} {
 		if !strings.Contains(body, want) {
 			t.Errorf("binary control missing %q", want)
 		}
+	}
+	if strings.Contains(body, `name="certificateAttr"`) {
+		t.Error("binary attribute must not render a text input")
 	}
 	// Postal Address → textarea with the current value.
 	for _, want := range []string{`name="postalAddress"`, "<textarea", "123 Main St"} {
@@ -2215,6 +2219,41 @@ func TestEditFormPhotoPreviews(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("edit photo previews missing %q", want)
 		}
+	}
+}
+
+func TestEditFormPhotoUploadControl(t *testing.T) {
+	jpeg := []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10}
+	entry := genericOUEntry()
+	entry.Attributes = append(entry.Attributes,
+		&ldap.EntryAttribute{Name: "jpegPhoto", Values: []string{string(jpeg)}},
+	)
+	fake := &fakeClient{
+		baseDN: "dc=example,dc=com",
+		schema: controlSchema(),
+		searchFn: func(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{entry}}, nil
+		},
+	}
+	h := testHandler(t, fake)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/entry/ou=People,dc=example,dc=com/edit", nil)
+	req.SetPathValue("dn", "ou=People,dc=example,dc=com")
+	h.EditForm(rr, req)
+	body := rr.Body.String()
+	for _, want := range []string{
+		`src="/api/entry/`,
+		`/photo?idx=0"`,
+		`name="binfile_jpegPhoto"`,
+		"Replace with file",
+		"Select a file to replace the photo.",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("photo upload control missing %q", want)
+		}
+	}
+	if strings.Contains(body, `name="jpegPhoto"`) || strings.Contains(body, "[photo]") {
+		t.Errorf("jpegPhoto must not render a text input: %.400s", body)
 	}
 }
 

@@ -358,7 +358,7 @@ func (h *Handler) templateEditFields(r *http.Request, e *ldap.Entry, tmpl *tplen
 			if _, _, ok := photoBytes(firstValue(e.GetAttributeValues(a.ID))); ok {
 				f.preview = photoURL(e.DN, 0)
 				f.readonly = true
-				f.hint = "Photo preview — binary photo values are not editable in this flow."
+				f.hint = "Select a file to replace the photo."
 				f.values = []string{"[photo]"}
 			}
 		case "avatarpath":
@@ -453,7 +453,7 @@ func (h *Handler) genericEditFields(e *ldap.Entry, submitted map[string][]string
 			if _, _, ok := photoBytes(firstValue(a.Values)); ok {
 				f.preview = photoURL(e.DN, 0)
 				f.readonly = true
-				f.hint = "Photo preview — binary photo values are not editable in this flow."
+				f.hint = "Select a file to replace the photo."
 				f.values = []string{"[photo]"}
 			}
 		case "avatarpath":
@@ -810,7 +810,7 @@ func applySchemaControl(f *editFieldModel, sk ldapx.ControlKind, current []strin
 		f.binary = true
 		if !f.readonly {
 			f.readonly = true
-			f.hint = "Binary value — not editable in this flow"
+			f.hint = "Select a file to replace the current value."
 			f.values = []string{"[binary]"}
 		}
 	case ldapx.ControlKindDN:
