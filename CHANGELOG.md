@@ -67,6 +67,13 @@ unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
   production; removed the field, its stale comment, and the test-harness
   assignment. `BindPasswordEnv` remains as the documented deprecated name.
 
+## fix(test): keep flow tests under the login rate limit (2026-09-01)
+
+- The integration flows share one server (and therefore one login limiter);
+  `login()` now reuses the shared session cookie instead of re-POSTing
+  `/login` on every test, keeping the suite under the 2/s burst-5 login
+  limiter added with the login gate.
+
 ## Logout control and identity in the header (2026-09-01)
 
 - `feat(web)` — authenticated pages now render a "Log out" button in the

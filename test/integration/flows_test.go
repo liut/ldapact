@@ -47,6 +47,9 @@ func body(t *testing.T, resp *http.Response) string {
 // the session cookie for every later request (login gate, U6).
 func login(t *testing.T) {
 	t.Helper()
+	if alreadyLoggedIn(t) {
+		return // reuse the shared session instead of re-hitting /login
+	}
 	form := url.Values{
 		"bind_dn":  {envCfg.LDAP.BindDN},
 		"password": {envInst.AdminPassword},
@@ -60,6 +63,19 @@ func login(t *testing.T) {
 	if resp.StatusCode != http.StatusFound && resp.StatusCode != http.StatusOK {
 		t.Fatalf("login = %d: %.300s", resp.StatusCode, body(t, resp))
 	}
+}
+
+// alreadyLoggedIn reports whether the shared cookie jar already holds a
+// session cookie. The flow tests share one server and one limiter, so
+// skipping redundant logins keeps the suite under the /login rate limit
+// (2/s, burst 5) while preserving a valid session for every later request.
+func alreadyLoggedIn(t *testing.T) bool {
+	t.Helper()
+	u, err := url.Parse(serverURL())
+	if err != nil {
+		t.Fatalf("parse server URL: %v", err)
+	}
+	return len(client().Jar.Cookies(u)) > 0
 }
 
 // TestFlowF1TreeBrowse: home scaffold + paged children (AE1/AE2 mechanics).
