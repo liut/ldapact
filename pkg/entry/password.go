@@ -31,7 +31,7 @@ func (h *Handler) PasswordForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !has {
-		h.renderPage(w, "Change password — ldapact", "password-form-content", PasswordFormData{
+		h.renderPage(w, r, "Change password — ldapact", "password-form-content", PasswordFormData{
 			DN: dn, NoPassword: true, Error: "This entry has no userPassword attribute.",
 		})
 		return
@@ -41,7 +41,7 @@ func (h *Handler) PasswordForm(w http.ResponseWriter, r *http.Request) {
 		h.dnError(w, r, err)
 		return
 	}
-	h.renderPage(w, "Change password — ldapact", "password-form-content", PasswordFormData{DN: dn, CurrentScheme: scheme})
+	h.renderPage(w, r, "Change password — ldapact", "password-form-content", PasswordFormData{DN: dn, CurrentScheme: scheme})
 }
 
 // PasswordChange handles POST /entry/{dn...}/password (F3).
@@ -54,11 +54,11 @@ func (h *Handler) PasswordChange(w http.ResponseWriter, r *http.Request) {
 	newPW := r.FormValue("new_password")
 	confirm := r.FormValue("confirm_password")
 	if newPW == "" {
-		h.renderPage(w, "Change password — ldapact", "password-form-content", PasswordFormData{DN: dn, Error: "Password is required"})
+		h.renderPage(w, r, "Change password — ldapact", "password-form-content", PasswordFormData{DN: dn, Error: "Password is required"})
 		return
 	}
 	if newPW != confirm {
-		h.renderPage(w, "Change password — ldapact", "password-form-content", PasswordFormData{DN: dn, Error: "Passwords do not match"})
+		h.renderPage(w, r, "Change password — ldapact", "password-form-content", PasswordFormData{DN: dn, Error: "Passwords do not match"})
 		return
 	}
 	has, err := h.passwordAvailable(r, dn)
@@ -67,7 +67,7 @@ func (h *Handler) PasswordChange(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !has {
-		h.renderPage(w, "Change password — ldapact", "password-form-content", PasswordFormData{
+		h.renderPage(w, r, "Change password — ldapact", "password-form-content", PasswordFormData{
 			DN: dn, NoPassword: true, Error: "This entry has no userPassword attribute.",
 		})
 		return
@@ -95,7 +95,7 @@ func (h *Handler) PasswordChange(w http.ResponseWriter, r *http.Request) {
 		// ppolicy overlays surface constraint violations as result codes
 		// (e.g. 19 constraintViolation, 53 unwillingToPerform).
 		h.logger.Warn("password change rejected", "event", "ldap.error", "dn", dn, "error", err)
-		h.renderPage(w, "Change password — ldapact", "password-form-content", PasswordFormData{
+		h.renderPage(w, r, "Change password — ldapact", "password-form-content", PasswordFormData{
 			DN: dn, CurrentScheme: scheme, Error: passwordChangeError(err),
 		})
 		return
@@ -103,14 +103,14 @@ func (h *Handler) PasswordChange(w http.ResponseWriter, r *http.Request) {
 	// AE4: verify the new password binds.
 	if err := verifyUserBind(r.Context(), h.cfg, dn, newPW); err != nil {
 		h.logger.Error("password set but bind verification failed", "event", "password.verify_failed", "dn", dn, "error", err)
-		h.renderPage(w, "Change password — ldapact", "password-form-content", PasswordFormData{
+		h.renderPage(w, r, "Change password — ldapact", "password-form-content", PasswordFormData{
 			DN: dn, CurrentScheme: scheme,
 			Error: "Password was updated but the bind verification failed — check the directory server.",
 		})
 		return
 	}
 	h.audit(r, "ldap.modify", dn, "modify")
-	h.renderPage(w, "Password changed — ldapact", "password-form-content", PasswordFormData{
+	h.renderPage(w, r, "Password changed — ldapact", "password-form-content", PasswordFormData{
 		DN: dn, CurrentScheme: scheme, Success: "Password changed. Old passwords no longer work.",
 	})
 }

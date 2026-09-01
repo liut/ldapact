@@ -70,7 +70,8 @@ func TestFlowF1TreeBrowse(t *testing.T) {
 		t.Fatalf("home = %d", resp.StatusCode)
 	}
 	home := body(t, resp)
-	for _, want := range []string{`role="tree"`, "dc=example,dc=com", "Import LDIF", "Search", "Schema"} {
+	for _, want := range []string{`role="tree"`, "dc=example,dc=com", "Import LDIF", "Search", "Schema",
+		`action="/logout"`, "Logged in as"} {
 		if !strings.Contains(home, want) {
 			t.Errorf("home missing %q", want)
 		}

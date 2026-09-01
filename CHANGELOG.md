@@ -3,6 +3,15 @@
 All notable changes to ldapact v1 are tracked here, one entry per implementation
 unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
 
+## Logout control and identity in the header (2026-09-01)
+
+- `feat(web)` — authenticated pages now render a "Log out" button in the
+  header (POST /logout, protected by the same CSRF/rate-limit chain) plus the
+  logged-in bind DN as small "Logged in as <DN>" text; the public login page
+  keeps the plain header. The renderer gains `PageAuth(..., actor)`, and the
+  authn middleware attaches the bind DN to the request context for page
+  rendering (`web.WithActor`/`ActorFrom`).
+
 ## Redis-to-memory fallback + Makefile sync (2026-09-01)
 
 - `feat(config)` — when `LDAPADM_SESSION_STORE` is left at the default and

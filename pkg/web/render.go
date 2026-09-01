@@ -8,10 +8,13 @@ import (
 )
 
 // layoutData is injected into layout.html: Body holds the already-escaped
-// output of a content template.
+// output of a content template. Authenticated pages render the logout
+// control in the header; public pages (the login form) do not.
 type layoutData struct {
-	Title string
-	Body  template.HTML
+	Title         string
+	Body          template.HTML
+	Authenticated bool
+	Actor         string
 }
 
 // Renderer executes named templates, either full pages or HTMX fragments.
@@ -41,12 +44,25 @@ func (r *Renderer) Fragment(w io.Writer, name string, data any) error {
 // buffer, then wraps it in layout.html. Wrapping after escaping avoids
 // double-escaping while keeping the shell DRY.
 func (r *Renderer) Page(w io.Writer, title, contentName string, data any) error {
+	return r.page(w, title, contentName, data, false, "")
+}
+
+// PageAuth renders a full page inside the authenticated layout: the header
+// shows the logged-in bind DN (actor) and the logout control. Use it for
+// every page behind the login gate.
+func (r *Renderer) PageAuth(w io.Writer, title, contentName string, data any, actor string) error {
+	return r.page(w, title, contentName, data, true, actor)
+}
+
+func (r *Renderer) page(w io.Writer, title, contentName string, data any, authenticated bool, actor string) error {
 	var buf bytes.Buffer
 	if err := r.Fragment(&buf, contentName, data); err != nil {
 		return err
 	}
 	return r.tmpl.ExecuteTemplate(w, "layout.html", layoutData{
-		Title: title,
-		Body:  template.HTML(buf.String()),
+		Title:         title,
+		Body:          template.HTML(buf.String()),
+		Authenticated: authenticated,
+		Actor:         actor,
 	})
 }

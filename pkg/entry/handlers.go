@@ -174,9 +174,9 @@ func (l *TemplateLoader) ModificationNames() []string {
 }
 
 // renderPage renders a full page via the shared layout.
-func (h *Handler) renderPage(w http.ResponseWriter, title, content string, data any) {
+func (h *Handler) renderPage(w http.ResponseWriter, r *http.Request, title, content string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := h.render.Page(w, title, content, data); err != nil {
+	if err := h.render.PageAuth(w, title, content, data, web.ActorFrom(r.Context())); err != nil {
 		h.logger.Error("render page", "event", "web.render_failed", "template", content, "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}

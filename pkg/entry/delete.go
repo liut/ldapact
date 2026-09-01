@@ -28,7 +28,7 @@ func (h *Handler) DeleteForm(w http.ResponseWriter, r *http.Request) {
 		h.dnError(w, r, err)
 		return
 	}
-	h.renderPage(w, "Delete entry — ldapact", "delete-confirm-content", DeleteConfirmData{
+	h.renderPage(w, r, "Delete entry — ldapact", "delete-confirm-content", DeleteConfirmData{
 		DN: dn, RDN: rdnValue(dn), ChildCount: count, Blocked: count > 0,
 		Crumbs: tree.Breadcrumbs(dn, h.client.BaseDN(), 5),
 	})
@@ -48,7 +48,7 @@ func (h *Handler) DeleteSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if count > 0 {
-		h.renderPage(w, "Delete entry — ldapact", "delete-confirm-content", DeleteConfirmData{
+		h.renderPage(w, r, "Delete entry — ldapact", "delete-confirm-content", DeleteConfirmData{
 			DN: dn, RDN: rdnValue(dn), ChildCount: count, Blocked: true,
 			Crumbs: tree.Breadcrumbs(dn, h.client.BaseDN(), 5),
 		})
@@ -64,7 +64,7 @@ func (h *Handler) DeleteSubmit(w http.ResponseWriter, r *http.Request) {
 	h.audit(r, "ldap.delete", dn, "delete")
 	parent := parentDN(dn)
 	w.Header().Set("X-Mutated-Subtree", parent)
-	h.renderPage(w, "Entry deleted — ldapact", "result-page", ResultData{
+	h.renderPage(w, r, "Entry deleted — ldapact", "result-page", ResultData{
 		Title: "Entry deleted", Message: fmt.Sprintf("Deleted %s", dn),
 		Link: "/entry/" + url.PathEscape(parent), LinkText: "Back to parent",
 	})

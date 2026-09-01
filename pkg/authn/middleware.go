@@ -14,6 +14,7 @@ import (
 
 	"github.com/liut/ldapact/pkg/ldapx"
 	"github.com/liut/ldapact/pkg/session"
+	"github.com/liut/ldapact/pkg/web"
 )
 
 type ctxKey int
@@ -80,6 +81,7 @@ func Middleware(opts MiddlewareOptions) func(http.Handler) http.Handler {
 			ctx := context.WithValue(r.Context(), sessionKey, sess)
 			ctx = context.WithValue(ctx, storeKey, opts.Store)
 			ctx = ldapx.WithCredential(ctx, cred)
+			ctx = web.WithActor(ctx, sess.Value.ProfileRef)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

@@ -73,7 +73,7 @@ func (t *Tree) HomePage(w http.ResponseWriter, r *http.Request) {
 		RootLabel: rdnLabel(root),
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := t.render.Page(w, "ldapact — Directory", "tree-page-content", data); err != nil {
+	if err := t.render.PageAuth(w, "ldapact — Directory", "tree-page-content", data, web.ActorFrom(r.Context())); err != nil {
 		t.logger.Error("render tree page", "event", "web.render_failed", "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}

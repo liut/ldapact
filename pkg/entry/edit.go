@@ -212,7 +212,7 @@ func (h *Handler) EditSubmit(w http.ResponseWriter, r *http.Request) {
 		changes = append(changes, binChanges...)
 		defer h.cleanupBinaryTokens(r)
 		if len(changes) == 0 {
-			h.renderPage(w, "No changes — ldapact", "result-page", ResultData{
+			h.renderPage(w, r, "No changes — ldapact", "result-page", ResultData{
 				Title:    "No changes",
 				Message:  "No attributes were changed.",
 				Link:     "/entry/" + url.PathEscape(dn),
@@ -237,7 +237,7 @@ func (h *Handler) EditSubmit(w http.ResponseWriter, r *http.Request) {
 		}
 		h.audit(r, "ldap.modify", dn, "modify")
 		w.Header().Set("X-Mutated-Subtree", parentDN(dn))
-		h.renderPage(w, "Entry updated — ldapact", "result-page", ResultData{
+		h.renderPage(w, r, "Entry updated — ldapact", "result-page", ResultData{
 			Title:    "Entry updated",
 			Message:  fmt.Sprintf("Updated %s", dn),
 			Link:     "/entry/" + url.PathEscape(dn),
@@ -558,7 +558,7 @@ func (h *Handler) renderEditForm(w http.ResponseWriter, r *http.Request, e *ldap
 		ff.Error = errs[strings.ToLower(f.id)]
 		attrs = append(attrs, ff)
 	}
-	h.renderPage(w, "Edit entry — ldapact", "edit-form-content", EditFormData{
+	h.renderPage(w, r, "Edit entry — ldapact", "edit-form-content", EditFormData{
 		DN:            e.DN,
 		TemplateName:  name,
 		TemplateTitle: title,
@@ -613,7 +613,7 @@ func (h *Handler) renderEditConfirm(w http.ResponseWriter, r *http.Request, e *l
 			})
 		}
 	}
-	h.renderPage(w, "Review changes — ldapact", "edit-confirm-content", EditConfirmData{
+	h.renderPage(w, r, "Review changes — ldapact", "edit-confirm-content", EditConfirmData{
 		DN:           e.DN,
 		TemplateName: name,
 		Rows:         rows,

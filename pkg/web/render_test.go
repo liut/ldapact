@@ -63,6 +63,35 @@ func TestRenderFullPage(t *testing.T) {
 	}
 }
 
+func TestRenderAuthenticatedPageShowsActorAndLogout(t *testing.T) {
+	var buf bytes.Buffer
+	err := renderer(t).PageAuth(&buf, "ldapact", "home-content", nil, "cn=admin,dc=example,dc=com")
+	if err != nil {
+		t.Fatalf("PageAuth: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		`Logged in as <code>cn=admin,dc=example,dc=com</code>`,
+		`action="/logout"`,
+		`>Log out</button>`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("authenticated page missing %q:\n%s", want, out)
+		}
+	}
+
+	// The plain Page (login form) must not show the session identity.
+	var plain bytes.Buffer
+	if err := renderer(t).Page(&plain, "Login — ldapact", "login-content", nil); err != nil {
+		t.Fatalf("Page: %v", err)
+	}
+	for _, banned := range []string{"Logged in as", `action="/logout"`} {
+		if strings.Contains(plain.String(), banned) {
+			t.Errorf("public page must not render %q", banned)
+		}
+	}
+}
+
 func TestRenderMissingTemplate(t *testing.T) {
 	var buf bytes.Buffer
 	err := renderer(t).Fragment(&buf, "nope.html", nil)

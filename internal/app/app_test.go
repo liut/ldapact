@@ -129,6 +129,19 @@ func TestLoginGateFlow(t *testing.T) {
 	if len(hc.Jar.Cookies(mustURL(t, srv.URL))) == 0 {
 		t.Fatal("login must set a session cookie")
 	}
+	resp, err = hc.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := readAll(t, resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("home after login = %d", resp.StatusCode)
+	}
+	for _, want := range []string{`action="/logout"`, "Logged in as", cfg.LDAP.BindDN} {
+		if !strings.Contains(home, want) {
+			t.Errorf("home missing %q", want)
+		}
+	}
 	resp, err = hc.Get(srv.URL + "/api/tree/dc=example,dc=com/children?page=1&level=2")
 	if err != nil {
 		t.Fatal(err)

@@ -14,6 +14,14 @@
   <a class="skip-link" href="#main-content">Skip to main content</a>
   <header class="site-header" role="banner">
     <a class="site-title" href="/">ldapact</a>
+    {{if .Authenticated}}
+    <div class="session-identity">
+      <span class="actor">Logged in as <code>{{.Actor}}</code></span>
+      <form class="logout-form" method="post" action="/logout">
+        <button type="submit" class="logout-button">Log out</button>
+      </form>
+    </div>
+    {{end}}
   </header>
   <main id="main-content" role="main" class="site-main" tabindex="-1">
     {{.Body}}

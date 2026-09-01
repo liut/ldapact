@@ -24,7 +24,7 @@ type RenameFormData struct {
 // RenameForm handles GET /entry/{dn...}/rename.
 func (h *Handler) RenameForm(w http.ResponseWriter, r *http.Request) {
 	dn := r.PathValue("dn")
-	h.renderPage(w, "Rename entry — ldapact", "rename-form-content", RenameFormData{
+	h.renderPage(w, r, "Rename entry — ldapact", "rename-form-content", RenameFormData{
 		DN: dn, ParentDN: parentDN(dn), DeleteOldRDN: true,
 		Crumbs: tree.Breadcrumbs(dn, h.client.BaseDN(), 5),
 	})
@@ -41,7 +41,7 @@ func (h *Handler) RenameSubmit(w http.ResponseWriter, r *http.Request) {
 	newSuperior := strings.TrimSpace(r.FormValue("new_superior"))
 	deleteOld := r.FormValue("delete_old_rdn") == "1"
 	if newRDN == "" {
-		h.renderPage(w, "Rename entry — ldapact", "rename-form-content", RenameFormData{
+		h.renderPage(w, r, "Rename entry — ldapact", "rename-form-content", RenameFormData{
 			DN: dn, ParentDN: parentDN(dn), NewRDN: newRDN, NewSuperior: newSuperior, DeleteOldRDN: deleteOld,
 			Crumbs: tree.Breadcrumbs(dn, h.client.BaseDN(), 5),
 			Error:  "New RDN is required",
@@ -58,7 +58,7 @@ func (h *Handler) RenameSubmit(w http.ResponseWriter, r *http.Request) {
 			0, 0, false, "(objectClass=*)", []string{"1.1"}, nil)
 		if _, err := h.client.Search(r.Context(), req); err != nil {
 			if isNotFound(err) {
-				h.renderPage(w, "Rename entry — ldapact", "rename-form-content", RenameFormData{
+				h.renderPage(w, r, "Rename entry — ldapact", "rename-form-content", RenameFormData{
 					DN: dn, ParentDN: parentDN(dn), NewRDN: newRDN, NewSuperior: newSuperior, DeleteOldRDN: deleteOld,
 					Crumbs: tree.Breadcrumbs(dn, h.client.BaseDN(), 5),
 					Error:  "Target parent does not exist",
@@ -73,7 +73,7 @@ func (h *Handler) RenameSubmit(w http.ResponseWriter, r *http.Request) {
 		if handleInvalidCredentials(w, r, err) {
 			return
 		}
-		h.renderPage(w, "Rename entry — ldapact", "rename-form-content", RenameFormData{
+		h.renderPage(w, r, "Rename entry — ldapact", "rename-form-content", RenameFormData{
 			DN: dn, ParentDN: parentDN(dn), NewRDN: newRDN, NewSuperior: newSuperior, DeleteOldRDN: deleteOld,
 			Crumbs: tree.Breadcrumbs(dn, h.client.BaseDN(), 5),
 			Error:  "Rename failed: " + err.Error(),
@@ -90,7 +90,7 @@ func (h *Handler) RenameSubmit(w http.ResponseWriter, r *http.Request) {
 	if targetParent != "" {
 		newDN = newRDN + "," + targetParent
 	}
-	h.renderPage(w, "Entry renamed — ldapact", "result-page", ResultData{
+	h.renderPage(w, r, "Entry renamed — ldapact", "result-page", ResultData{
 		Title:    "Entry renamed",
 		Message:  fmt.Sprintf("Renamed to %s", newDN),
 		Link:     "/entry/" + url.PathEscape(newDN),
