@@ -65,3 +65,48 @@ func TestHandler(t *testing.T) {
 		t.Errorf("Retry-After = %q", rr.Header().Get("Retry-After"))
 	}
 }
+
+func TestProxyKeyFirstHop(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "10.0.0.1:1234"
+	req.Header.Set("X-Forwarded-For", "203.0.113.7, 10.0.0.2")
+	if got := ProxyKey(req); got != "203.0.113.7" {
+		t.Errorf("ProxyKey = %q, want the first hop", got)
+	}
+}
+
+func TestProxyKeyFallsBackToRemoteAddr(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "10.0.0.1:1234"
+	if got := ProxyKey(req); got != "10.0.0.1" {
+		t.Errorf("ProxyKey = %q, want RemoteAddr fallback", got)
+	}
+}
+
+func TestHandlerWithCustomKey(t *testing.T) {
+	l := NewWithKey(1000, 1, func(r *http.Request) string {
+		return r.Header.Get("X-Client")
+	})
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	alice := httptest.NewRequest(http.MethodGet, "/", nil)
+	alice.Header.Set("X-Client", "alice")
+	rr := httptest.NewRecorder()
+	l.Handler(next).ServeHTTP(rr, alice)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("first alice request = %d", rr.Code)
+	}
+	rr = httptest.NewRecorder()
+	l.Handler(next).ServeHTTP(rr, alice)
+	if rr.Code != http.StatusTooManyRequests {
+		t.Errorf("second alice request = %d, want 429", rr.Code)
+	}
+	bob := httptest.NewRequest(http.MethodGet, "/", nil)
+	bob.Header.Set("X-Client", "bob")
+	rr = httptest.NewRecorder()
+	l.Handler(next).ServeHTTP(rr, bob)
+	if rr.Code != http.StatusNoContent {
+		t.Errorf("bob request = %d, want independent key to pass", rr.Code)
+	}
+}

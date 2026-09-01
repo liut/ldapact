@@ -11,6 +11,7 @@ import (
 	"strconv"
 
 	"github.com/go-ldap/ldap/v3"
+	"github.com/liut/ldapact/pkg/authn"
 	"github.com/liut/ldapact/pkg/ldapx"
 	"github.com/liut/ldapact/pkg/web"
 )
@@ -72,7 +73,7 @@ func (t *Tree) HomePage(w http.ResponseWriter, r *http.Request) {
 		RootLabel: rdnLabel(root),
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := t.render.Page(w, "ldapact — Directory", "tree-page-content", data); err != nil {
+	if err := t.render.PageAuth(w, "ldapact — Directory", "tree-page-content", data, web.ActorFrom(r.Context())); err != nil {
 		t.logger.Error("render tree page", "event", "web.render_failed", "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
@@ -107,6 +108,10 @@ func (t *Tree) Children(w http.ResponseWriter, r *http.Request) {
 		PageSize: t.pageSize,
 	}, page)
 	if err != nil {
+		if authn.IsInvalidCredentials(err) {
+			authn.InvalidCredentialsRedirect(w, r)
+			return
+		}
 		t.renderFragment(w, ChildrenData{
 			ID:       containerID,
 			ParentDN: dn,

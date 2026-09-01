@@ -102,7 +102,7 @@ func (s *SchemaBrowser) ObjectClasses(w http.ResponseWriter, r *http.Request) {
 			URL:  "/schema/objectclass/" + url.PathEscape(name),
 		})
 	}
-	s.renderPage(w, "Object Classes — ldapact", "schema-list-content", SchemaListData{Title: "Object Classes", Rows: rows})
+	s.renderPage(w, r, "Object Classes — ldapact", "schema-list-content", SchemaListData{Title: "Object Classes", Rows: rows})
 }
 
 // ObjectClassDetail handles GET /schema/objectclass/{name}.
@@ -145,7 +145,7 @@ func (s *SchemaBrowser) ObjectClassDetail(w http.ResponseWriter, r *http.Request
 	}
 	data.Must = schemaAttrLinks(schema.EffectiveMustAttrs(oc.Name), oc.Name)
 	data.May = schemaAttrLinks(schema.EffectiveMayAttrs(oc.Name), oc.Name)
-	s.renderPage(w, name+" — ldapact", "schema-detail-content", data)
+	s.renderPage(w, r, name+" — ldapact", "schema-detail-content", data)
 }
 
 // schemaAttrLinks converts source-tagged objectClass attributes into view
@@ -190,7 +190,7 @@ func (s *SchemaBrowser) Attributes(w http.ResponseWriter, r *http.Request) {
 			URL:  "/schema/attribute/" + url.PathEscape(name),
 		})
 	}
-	s.renderPage(w, "Attribute Types — ldapact", "schema-list-content", SchemaListData{Title: "Attribute Types", Rows: rows})
+	s.renderPage(w, r, "Attribute Types — ldapact", "schema-list-content", SchemaListData{Title: "Attribute Types", Rows: rows})
 }
 
 // AttributeDetail handles GET /schema/attribute/{name}.
@@ -245,7 +245,7 @@ func (s *SchemaBrowser) AttributeDetail(w http.ResponseWriter, r *http.Request) 
 			URL:  "/schema/objectclass/" + url.PathEscape(oc),
 		})
 	}
-	s.renderPage(w, name+" — ldapact", "schema-detail-content", data)
+	s.renderPage(w, r, name+" — ldapact", "schema-detail-content", data)
 }
 
 // formatMaxLength renders a syntax {length} as a human-readable string with
@@ -270,9 +270,9 @@ func formatMaxLength(n int) string {
 	return b.String() + " " + unit
 }
 
-func (s *SchemaBrowser) renderPage(w http.ResponseWriter, title, content string, data any) {
+func (s *SchemaBrowser) renderPage(w http.ResponseWriter, r *http.Request, title, content string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.render.Page(w, title, content, data); err != nil {
+	if err := s.render.PageAuth(w, title, content, data, web.ActorFrom(r.Context())); err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
 }

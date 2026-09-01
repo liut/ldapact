@@ -36,7 +36,18 @@ func TestIntegrationRoundTrip(t *testing.T) {
 	}
 	defer client.Close()
 
-	// Subschema cache is populated at startup (R14).
+	// The main pool is unbound (R15): every operation uses the
+	// request-scoped credential injected into the context (U5).
+	ctx = WithCredential(ctx, BindCredential{DN: inst.AdminDN, Password: inst.AdminPassword})
+
+	// The subschema cache loads lazily on the first authenticated
+	// operation (U5); it must be populated after the first search.
+	if _, err := client.Page(ctx, SearchOptions{
+		BaseDN: "dc=example,dc=com",
+		Scope:  ldap.ScopeSingleLevel,
+	}, 1); err != nil {
+		t.Fatalf("first authenticated Page: %v", err)
+	}
 	schema := client.Schema()
 	if _, ok := schema.ObjectClass("inetOrgPerson"); !ok {
 		t.Error("schema cache missing inetOrgPerson")
@@ -102,18 +113,129 @@ func TestIntegrationRoundTrip(t *testing.T) {
 	}
 }
 
-func TestIntegrationInvalidCredentials(t *testing.T) {
+func TestIntegrationVerifyBind(t *testing.T) {
 	ctx := context.Background()
 	inst := testInstance(t, ctx)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	cfg := inst.Config()
-	cfg.BindPassword = "wrong-password"
-	_, err := New(ctx, cfg, logger)
+	dialOpts := DialOptions{URL: cfg.LDAP.URL, TLS: cfg.LDAP.TLS, Logger: logger}
+
+	// Correct credentials: the login gate's check succeeds (R6).
+	if err := VerifyBind(ctx, dialOpts, inst.AdminDN, inst.AdminPassword); err != nil {
+		t.Fatalf("VerifyBind with correct credentials: %v", err)
+	}
+
+	// Wrong password: typed LDAP result code 49, never a network error.
+	err := VerifyBind(ctx, dialOpts, inst.AdminDN, "wrong-password")
 	if err == nil {
 		t.Fatal("want bind failure with wrong password")
 	}
 	var lerr *LDAPError
-	if !errors.As(err, &lerr) || lerr.Code != 49 {
+	if !errors.As(err, &lerr) || lerr.Code != ldap.LDAPResultInvalidCredentials {
 		t.Fatalf("want LDAP result code 49 (invalidCredentials), got %v", err)
+	}
+	if !IsInvalidCredentials(err) {
+		t.Fatalf("IsInvalidCredentials must be true, got %v", err)
+	}
+}
+
+func TestIntegrationPerRequestBind(t *testing.T) {
+	ctx := context.Background()
+	inst := testInstance(t, ctx)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	client, err := New(ctx, inst.Config(), logger)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer client.Close()
+
+	adminCtx := WithCredential(ctx, BindCredential{DN: inst.AdminDN, Password: inst.AdminPassword})
+
+	// A non-admin user with its own password can bind and search, proving
+	// the pool binds per request instead of keeping a configured identity.
+	userDN := "cn=u5user,dc=example,dc=com"
+	if err := client.Add(adminCtx, userDN, map[string][]string{
+		"objectClass":  {"top", "person"},
+		"cn":           {"u5user"},
+		"sn":           {"User"},
+		"userPassword": {"u5-password"},
+	}); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	defer func() { _ = client.Delete(adminCtx, userDN) }()
+
+	userCtx := WithCredential(ctx, BindCredential{DN: userDN, Password: "u5-password"})
+	res, err := client.Search(userCtx, ldap.NewSearchRequest(userDN, ldap.ScopeBaseObject,
+		ldap.NeverDerefAliases, 0, 0, false, "(objectClass=*)", nil, nil))
+	if err != nil {
+		t.Fatalf("search with per-request user bind: %v", err)
+	}
+	if len(res.Entries) != 1 {
+		t.Fatalf("want 1 entry, got %d", len(res.Entries))
+	}
+
+	// Mutations still work with the admin identity on the same pool.
+	if err := client.Modify(adminCtx, userDN, []ldap.Change{{
+		Operation:    ldap.ReplaceAttribute,
+		Modification: ldap.PartialAttribute{Type: "description", Vals: []string{"updated"}},
+	}}); err != nil {
+		t.Fatalf("admin modify after user bind on same pool: %v", err)
+	}
+}
+
+// TestIntegrationReplicaFailover is AE4: two directory replicas with the
+// same identity; when the first replica goes down, operations and login
+// verification fail over to the second.
+func TestIntegrationReplicaFailover(t *testing.T) {
+	ctx := context.Background()
+	instA := testInstance(t, ctx)
+	instB := testInstance(t, ctx)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	// The two instances are independent directories with the same admin
+	// identity; seed the target entry on both so the failing-over request
+	// finds it whichever replica serves.
+	dn := "ou=replica-test,dc=example,dc=com"
+	for _, inst := range []*testldap.Instance{instA, instB} {
+		c, err := New(ctx, inst.Config(), logger)
+		if err != nil {
+			t.Fatalf("seed client: %v", err)
+		}
+		seedCtx := WithCredential(ctx, BindCredential{DN: inst.AdminDN, Password: inst.AdminPassword})
+		if err := c.Add(seedCtx, dn, map[string][]string{
+			"objectClass": {"top", "organizationalUnit"}, "ou": {"replica-test"},
+		}); err != nil {
+			c.Close()
+			t.Fatalf("seed %s: %v", inst.URL, err)
+		}
+		c.Close()
+	}
+
+	cfg := instA.Config()
+	cfg.LDAP.URL = ""
+	cfg.LDAP.Servers = []string{instA.URL, instB.URL}
+	client, err := New(ctx, cfg, logger)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer client.Close()
+	adminCtx := WithCredential(ctx, BindCredential{DN: instA.AdminDN, Password: instA.AdminPassword})
+
+	// Login verification works against the live replica set.
+	if err := client.VerifyBind(ctx, instA.AdminDN, instA.AdminPassword); err != nil {
+		t.Fatalf("VerifyBind with both replicas up: %v", err)
+	}
+
+	// Replica A goes down: writes and login verification must fail over to
+	// replica B (AE4).
+	instA.Stop()
+	if err := client.VerifyBind(ctx, instB.AdminDN, instB.AdminPassword); err != nil {
+		t.Fatalf("VerifyBind after replica A down: %v", err)
+	}
+	if err := client.Modify(adminCtx, dn, []ldap.Change{{
+		Operation:    ldap.ReplaceAttribute,
+		Modification: ldap.PartialAttribute{Type: "description", Vals: []string{"failover-ok"}},
+	}}); err != nil {
+		t.Fatalf("Modify after replica A down: %v", err)
 	}
 }

@@ -40,7 +40,7 @@ type Handler struct {
 	render   *web.Renderer
 	logger   *slog.Logger
 	loader   *TemplateLoader
-	sessions *session.Store
+	sessions session.Store
 	cfg      *config.Config
 }
 
@@ -97,7 +97,7 @@ type ResultData struct {
 }
 
 // New builds the flow handler.
-func New(client EntryClient, renderer *web.Renderer, logger *slog.Logger, loader *TemplateLoader, sessions *session.Store, cfg *config.Config) *Handler {
+func New(client EntryClient, renderer *web.Renderer, logger *slog.Logger, loader *TemplateLoader, sessions session.Store, cfg *config.Config) *Handler {
 	return &Handler{client: client, render: renderer, logger: logger, loader: loader, sessions: sessions, cfg: cfg}
 }
 
@@ -174,9 +174,9 @@ func (l *TemplateLoader) ModificationNames() []string {
 }
 
 // renderPage renders a full page via the shared layout.
-func (h *Handler) renderPage(w http.ResponseWriter, title, content string, data any) {
+func (h *Handler) renderPage(w http.ResponseWriter, r *http.Request, title, content string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := h.render.Page(w, title, content, data); err != nil {
+	if err := h.render.PageAuth(w, title, content, data, web.ActorFrom(r.Context())); err != nil {
 		h.logger.Error("render page", "event", "web.render_failed", "template", content, "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
@@ -205,6 +205,18 @@ func isNotFound(err error) bool {
 	var lerr *ldapx.LDAPError
 	if errors.As(err, &lerr) {
 		return lerr.Code == ldap.LDAPResultNoSuchObject
+	}
+	return false
+}
+
+// handleInvalidCredentials redirects to login when an LDAP operation fails
+// with invalidCredentials (R8/AE5): the stored bind credential no longer
+// works, so the session is invalidated and the user must re-login. Returns
+// true when the response is already written.
+func handleInvalidCredentials(w http.ResponseWriter, r *http.Request, err error) bool {
+	if authn.IsInvalidCredentials(err) {
+		authn.InvalidCredentialsRedirect(w, r)
+		return true
 	}
 	return false
 }

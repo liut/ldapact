@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/go-ldap/ldap/v3"
+	"github.com/liut/ldapact/pkg/authn"
 	"github.com/liut/ldapact/pkg/ldapx"
 	"github.com/liut/ldapact/pkg/web"
 )
@@ -129,7 +130,7 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 	data := Data{Query: q, Scope: scope, Base: base, Page: page, Sort: sortKey, Dir: dir}
 	if q == "" {
 		data.Error = "Enter a search filter."
-		h.renderPage(w, data)
+		h.renderPage(w, r, data)
 		return
 	}
 	// phpLDAPadmin parity: accept a bare attribute filter ("uid=alice",
@@ -141,7 +142,7 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := ldap.CompileFilter(q); err != nil {
 		data.Error = filterError(q, err)
-		h.renderPage(w, data)
+		h.renderPage(w, r, data)
 		return
 	}
 	scopeInt, ok := map[string]int{
@@ -182,8 +183,12 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := h.client.Page(r.Context(), opts, page)
 	if err != nil {
+		if authn.IsInvalidCredentials(err) {
+			authn.InvalidCredentialsRedirect(w, r)
+			return
+		}
 		data.Error = "Search failed: " + err.Error()
-		h.renderPage(w, data)
+		h.renderPage(w, r, data)
 		return
 	}
 	sortPage(res.Entries, sortKey, dir)
@@ -236,7 +241,7 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 			Dir:    dir,
 		})
 	}
-	h.renderPage(w, data)
+	h.renderPage(w, r, data)
 }
 
 // searchParams carries the current search URL state so pagination and sort
@@ -327,9 +332,9 @@ func containsString(vs []string, want string) bool {
 	return false
 }
 
-func (h *Handler) renderPage(w http.ResponseWriter, data Data) {
+func (h *Handler) renderPage(w http.ResponseWriter, r *http.Request, data Data) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := h.renderer.Page(w, "Search — ldapact", "search-content", data); err != nil {
+	if err := h.renderer.PageAuth(w, "Search — ldapact", "search-content", data, web.ActorFrom(r.Context())); err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
 }

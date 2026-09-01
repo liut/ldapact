@@ -5,9 +5,11 @@
 package ldapx
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"time"
 
 	"github.com/go-ldap/ldap/v3"
@@ -18,6 +20,10 @@ var (
 	ErrPoolClosed     = errors.New("ldapx: pool closed")
 	ErrStartTLSFailed = errors.New("ldapx: StartTLS failed")
 	ErrTLSCertExpired = errors.New("ldapx: LDAP TLS certificate expired")
+	// errNoRetryConn is returned when the retry wait could not obtain a
+	// replacement connection (single-conn pool draining after a drop).
+	// Replicas treat it as a replica-level network failure and fail over.
+	errNoRetryConn = errors.New("ldapx: no connection available for retry")
 )
 
 // LDAPError wraps an LDAP operation failure with the result code and target
@@ -70,9 +76,37 @@ func wrapError(op, dn string, err error) error {
 // isRetryable reports whether an operation failure is a network-level error
 // that warrants a single retry on a fresh connection (KTD 5).
 func isRetryable(err error) bool {
+	if errors.Is(err, errNoRetryConn) {
+		return true
+	}
 	var le *ldap.Error
 	if errors.As(err, &le) {
 		return le.ResultCode == ldap.ErrorNetwork || le.ResultCode == ldap.LDAPResultServerDown
+	}
+	return false
+}
+
+// isDialRetryable reports whether a dial/handshake failure is a
+// network-level transport error worth failing over to another replica.
+// Certificate/protocol failures (x509, ErrTLSCertExpired, malformed URLs)
+// are not net.Errors and will repeat on every replica, so they do not
+// qualify; canceled contexts are never failed over.
+func isDialRetryable(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var ne net.Error
+	return errors.As(err, &ne)
+}
+
+// IsInvalidCredentials reports whether err is an LDAP invalidCredentials
+// (result code 49) failure. The authn layer treats this as "session
+// invalid → clear session and redirect to login" (R8/AE5); the replica layer
+// never failovers on it (same directory identity on every replica).
+func IsInvalidCredentials(err error) bool {
+	var le *LDAPError
+	if errors.As(err, &le) {
+		return le.Code == ldap.LDAPResultInvalidCredentials
 	}
 	return false
 }

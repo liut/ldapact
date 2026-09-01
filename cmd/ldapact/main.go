@@ -6,9 +6,12 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -97,20 +100,29 @@ func run(args []string) int {
 
 	ldapClient, err := ldapx.New(ctx, cfg, logger)
 	if err != nil {
-		logger.Error("LDAP startup bind failed (fail-fast, R14)",
-			"event", "ldap.bind.failed",
+		logger.Error("LDAP startup dial failed (fail-fast, R15)",
+			"event", "ldap.dial.failed",
 			"error", err)
 		return 1
 	}
 	defer ldapClient.Close()
-	logger.Info("LDAP bound",
-		"event", "ldap.bind.ok",
+	replicas := len(cfg.LDAP.Servers)
+	if replicas == 0 {
+		replicas = 1
+	}
+	logger.Info("LDAP replicas ready",
+		"event", "ldap.dial_ok",
+		"replicas", replicas,
+		"active", ldapClient.ReplicaCount(),
 		"base_dn", cfg.LDAP.BaseDN)
 
-	sessionStore, err := session.NewStore(
-		cfg.Session.DBPath,
-		time.Duration(cfg.Session.TimeoutMinutes)*time.Minute,
-		time.Duration(cfg.Session.AbsoluteTimeoutMinutes)*time.Minute)
+	cipher, err := session.NewCredentialCipher(cfg.SessionKey)
+	if err != nil {
+		logger.Error("session credential cipher failed", "event", "session.cipher_failed", "error", err)
+		return 1
+	}
+
+	sessionStore, err := newSessionStore(ctx, cfg, logger)
 	if err != nil {
 		logger.Error("session store failed to open", "event", "session.store_open_failed", "error", err)
 		return 1
@@ -118,21 +130,21 @@ func run(args []string) int {
 	defer sessionStore.Close()
 	stopSweep := make(chan struct{})
 	defer close(stopSweep)
-	go sessionStore.SweepLoop(5*time.Minute, stopSweep)
+	session.StartSweepLoop(sessionStore, 5*time.Minute, stopSweep)
 
 	logger.Info("starting ldapact",
 		"event", "server.start",
 		"version", version,
 		"commit", commit,
 		"listen", cfg.Server.Listen,
-		"db_path", cfg.Session.DBPath,
+		"session_store", cfg.Session.Store,
 		"base_dn", cfg.LDAP.BaseDN,
 		"bind_dn", cfg.LDAP.BindDN,
 	)
 
 	srv := &http.Server{
 		Addr:              cfg.Server.Listen,
-		Handler:           app.NewHandler(app.Deps{Logger: logger, LDAP: ldapClient, Store: sessionStore, Cfg: cfg}),
+		Handler:           app.NewHandler(app.Deps{Logger: logger, LDAP: ldapClient, Store: sessionStore, Cipher: cipher, Cfg: cfg}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	serveErr := make(chan error, 1)
@@ -150,4 +162,59 @@ func run(args []string) int {
 		_ = srv.Shutdown(shutdownCtx)
 	}
 	return 0
+}
+
+// newSessionStore builds the configured session backend (R1/U8): Redis
+// (default), bbolt (non-default compatibility), or memory. Redis and bbolt
+// fail fast when their backing store is unreachable/invalid — except when
+// the redis store was defaulted (not explicitly configured) and the Redis
+// URL is empty or points at a loopback host (localhost/127.*/::1): those
+// dev-shaped configurations fall back to the in-memory store with a warning
+// instead of refusing to start.
+func newSessionStore(ctx context.Context, cfg *config.Config, logger *slog.Logger) (session.Store, error) {
+	idle := time.Duration(cfg.Session.TimeoutMinutes) * time.Minute
+	absolute := time.Duration(cfg.Session.AbsoluteTimeoutMinutes) * time.Minute
+	switch cfg.Session.Store {
+	case config.SessionStoreRedis:
+		store, err := session.NewRedisStore(ctx, session.RedisOptions{
+			URL:      cfg.Session.RedisURL,
+			Password: cfg.RedisPassword,
+			DB:       cfg.Session.RedisDB,
+		}, idle, absolute)
+		if err != nil && !cfg.SessionStoreExplicit &&
+			(cfg.Session.RedisURL == "" || isLoopbackRedisURL(cfg.Session.RedisURL)) {
+			logger.Warn("Redis unavailable; using in-memory session store",
+				"event", "session.redis_fallback_memory",
+				"redis_url", redisURLForLog(cfg.Session.RedisURL),
+				"error", err)
+			return session.NewMemoryStore(idle, absolute), nil
+		}
+		return store, err
+	case config.SessionStoreMemory:
+		return session.NewMemoryStore(idle, absolute), nil
+	default: // bbolt (R17): LDAPADM_DB_PATH applies here.
+		return session.NewStore(cfg.Session.DBPath, idle, absolute)
+	}
+}
+
+// isLoopbackRedisURL reports whether the Redis URL targets the local
+// machine (localhost, 127.*, or ::1) — the only shapes eligible for the
+// memory-store fallback.
+func isLoopbackRedisURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	return host == "localhost" || host == "::1" || strings.HasPrefix(host, "127.")
+}
+
+// redisURLForLog returns a log-safe view of a Redis URL: scheme + host only,
+// never the userinfo component (a password may be embedded in the URL).
+func redisURLForLog(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "<invalid-redis-url>"
+	}
+	return u.Scheme + "://" + u.Host
 }

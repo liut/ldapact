@@ -49,6 +49,19 @@ type PageResult struct {
 // Search runs a single LDAP search through the pool with one retry on
 // network-level failures.
 func (c *Client) Search(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+	if err := c.ensureSchema(ctx); err != nil {
+		return nil, err
+	}
+	res, err := c.search(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// search runs a single LDAP search through the pool without triggering the
+// lazy schema load (loadSchema itself uses this to avoid recursion).
+func (c *Client) search(ctx context.Context, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
 	var res *ldap.SearchResult
 	err := c.pool.Do(ctx, func(conn Conn) error {
 		var err error
@@ -71,6 +84,9 @@ func (c *Client) Search(ctx context.Context, req *ldap.SearchRequest) (*ldap.Sea
 // sessions are connection-scoped (sending a cookie on another connection
 // yields "paged results cookie is invalid").
 func (c *Client) Page(ctx context.Context, opts SearchOptions, page int) (*PageResult, error) {
+	if err := c.ensureSchema(ctx); err != nil {
+		return nil, err
+	}
 	if page < 1 {
 		page = 1
 	}
@@ -83,31 +99,51 @@ func (c *Client) Page(ctx context.Context, opts SearchOptions, page int) (*PageR
 	if opts.BaseDN == "" && !opts.AllowEmptyBase {
 		opts.BaseDN = c.baseDN
 	}
+	return c.pool.Page(ctx, opts, page)
+}
 
-	conn, err := c.pool.Get(ctx)
+// Page runs one replica's connection-scoped paged search loop (U7): the
+// whole multi-page walk runs on ONE pooled connection because LDAP
+// paged-result sessions are connection-scoped (sending a cookie on another
+// connection yields "paged results cookie is invalid").
+func (p *Pool) Page(ctx context.Context, opts SearchOptions, page int) (*PageResult, error) {
+
+	conn, err := p.Get(ctx)
 	if err != nil {
+		return nil, err
+	}
+	if err := p.bindFor(ctx, conn); err != nil {
+		conn.Close()
 		return nil, err
 	}
 	for attempt := 1; ; attempt++ {
 		res, perr := pageLoop(ctx, conn, opts, page)
 		if perr == nil {
-			c.pool.Put(conn)
+			p.Put(conn)
 			return res, nil
 		}
 		if attempt == 1 && isRetryable(perr) {
-			_ = c.pool.Put(conn) // validates and drops the sick conn
+			if p.opts.BindDN == "" {
+				conn.Close()
+			} else {
+				_ = p.Put(conn) // validates and drops the sick conn
+			}
 			select {
 			case <-time.After(backoffFor(attempt)):
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			}
-			conn, err = c.pool.Get(ctx)
+			conn, err = p.getRetry(ctx, attempt)
 			if err != nil {
+				return nil, err
+			}
+			if err := p.bindFor(ctx, conn); err != nil {
+				conn.Close()
 				return nil, err
 			}
 			continue
 		}
-		c.pool.Put(conn)
+		p.Put(conn)
 		return nil, perr
 	}
 }

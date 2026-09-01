@@ -2,6 +2,7 @@ package ldapx
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync/atomic"
 	"time"
@@ -10,9 +11,10 @@ import (
 )
 
 // Pool is a hand-rolled channel-based LDAP connection pool (KTD 5; go-ldap
-// ships no native pool). Connections are validated on Put with a base-scope
-// search and dropped on error; a health goroutine pings every connection every
-// 30s and refills the pool.
+// ships no native pool). In bound mode connections are validated on Put with
+// a base-scope search and dropped on error; in unbound mode (no configured
+// BindDN) each operation binds with the request-scoped credential from the
+// context, and health checking is dial-level (U5/R15).
 type Pool struct {
 	conns  chan Conn
 	opts   PoolOptions
@@ -22,9 +24,16 @@ type Pool struct {
 	logger *slog.Logger
 }
 
+// dialConn is the dial entry point used by pools. Tests override it to
+// inject fake connections without a real LDAP server.
+var dialConn = Dial
+
 // PoolOptions configures the pool.
 type PoolOptions struct {
-	Size           int
+	Size int
+	// BindDN/BindPassword are optional (U5/R15): empty leaves the pool
+	// unbound and every Do/Page binds with the request credential from the
+	// context. The auto-number pool keeps its configured identity.
 	BindDN         string
 	BindPassword   string
 	Dial           DialOptions
@@ -61,9 +70,12 @@ func NewPool(ctx context.Context, opts PoolOptions) (*Pool, error) {
 }
 
 func (p *Pool) newConn(ctx context.Context) (Conn, error) {
-	conn, err := Dial(ctx, p.opts.Dial)
+	conn, err := dialConn(ctx, p.opts.Dial)
 	if err != nil {
 		return nil, err
+	}
+	if p.opts.BindDN == "" {
+		return conn, nil
 	}
 	if err := Bind(conn, p.opts.BindDN, p.opts.BindPassword); err != nil {
 		conn.Close()
@@ -89,9 +101,11 @@ func (p *Pool) Get(ctx context.Context) (Conn, error) {
 	}
 }
 
-// Put validates the connection with a base-scope search; invalid connections
-// are closed and dropped (the health loop refills). After Close, Put closes
-// the connection.
+// Put validates bound-pool connections with a base-scope search; invalid
+// connections are closed and dropped (the health loop refills). Unbound
+// pools skip the search (dial-level health, R15) — operations detect dead
+// connections and retry on a fresh one. After Close, Put closes the
+// connection.
 func (p *Pool) Put(c Conn) error {
 	if p.closed.Load() {
 		c.Close()
@@ -115,16 +129,27 @@ func (p *Pool) Put(c Conn) error {
 	}
 }
 
-// validate performs the KTD 5 validate-on-Put search.
+// validate performs the KTD 5 validate-on-Put search for bound pools.
+// Unbound pools have no resting identity (each request binds), so a search
+// here would probe the wrong identity or fail on anonymous-search ACLs; the
+// dial-level health posture applies instead (R15).
 func (p *Pool) validate(c Conn) error {
+	if p.opts.BindDN == "" {
+		if c.IsClosing() {
+			return fmt.Errorf("ldapx: connection is closing")
+		}
+		return nil
+	}
 	req := ldap.NewSearchRequest("", ldap.ScopeBaseObject, ldap.NeverDerefAliases,
 		1, 5, false, "(objectClass=*)", []string{"1.1"}, nil)
 	_, err := c.Search(req)
 	return err
 }
 
-// Do acquires a connection, runs fn, and returns it. Network-level failures
-// retry once on a fresh connection after backoff (KTD 5).
+// Do acquires a connection, binds it to the request credential (unbound
+// pools), runs fn, and returns it. Network-level failures retry once on a
+// fresh connection after backoff (KTD 5). invalidCredentials (49) is not a
+// network error and is never retried.
 func (p *Pool) Do(ctx context.Context, fn func(Conn) error) error {
 	c, err := p.Get(ctx)
 	if err != nil {
@@ -133,28 +158,101 @@ func (p *Pool) Do(ctx context.Context, fn func(Conn) error) error {
 	attempt := 0
 	for {
 		attempt++
+		// Bind failures get the same KTD-5 single retry as operation
+		// failures: a connection that drops between Get and Bind is a
+		// network-level problem, not a credential problem.
+		if err := p.bindFor(ctx, c); err != nil {
+			c.Close()
+			if attempt == 1 && isRetryable(err) {
+				if !waitBackoff(ctx, attempt) {
+					return ctx.Err()
+				}
+				c, err = p.getRetry(ctx, attempt)
+				if err != nil {
+					return err
+				}
+				continue
+			}
+			return err
+		}
 		err = fn(c)
 		if err == nil {
 			p.Put(c)
 			return nil
 		}
 		if attempt == 1 && isRetryable(err) {
-			// Drop the sick connection (Put validates and closes it).
-			_ = p.Put(c)
-			select {
-			case <-time.After(backoffFor(attempt)):
-			case <-ctx.Done():
+			if p.opts.BindDN == "" {
+				// Unbound pools cannot validate; drop the sick connection
+				// outright so the retry uses a fresh one.
+				c.Close()
+			} else {
+				// Drop the sick connection (Put validates and closes it).
+				_ = p.Put(c)
+			}
+			if !waitBackoff(ctx, attempt) {
 				return ctx.Err()
 			}
-			c, err = p.Get(ctx)
+			c, err = p.getRetry(ctx, attempt)
 			if err != nil {
 				return err
 			}
 			continue
 		}
+		if p.opts.BindDN == "" && isRetryable(err) {
+			// Final network-level failure on an unbound pool: the connection
+			// is suspect, so drop it rather than recycle it unvalidated.
+			c.Close()
+			return err
+		}
 		p.Put(c)
 		return err
 	}
+}
+
+// waitBackoff sleeps the KTD-5 backoff for the attempt, reporting whether
+// the caller may proceed (false when ctx was canceled).
+func waitBackoff(ctx context.Context, attempt int) bool {
+	select {
+	case <-time.After(backoffFor(attempt)):
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// getRetry bounds the retry wait for a replacement connection: a single-conn
+// pool that just dropped its sick connection must not block the request
+// forever — the caller (or the replica layer) moves on.
+func (p *Pool) getRetry(ctx context.Context, attempt int) (Conn, error) {
+	select {
+	case c := <-p.conns:
+		if c == nil {
+			return nil, ErrPoolClosed
+		}
+		return c, nil
+	case <-time.After(backoffFor(attempt) + 50*time.Millisecond):
+		return nil, errNoRetryConn
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// bindFor applies the request-scoped credential to an unbound pool
+// connection. Bound pools keep their configured identity. Missing context
+// credentials bind anonymously — a pooled connection must never run an
+// operation under another request's bind.
+func (p *Pool) bindFor(ctx context.Context, c Conn) error {
+	if p.opts.BindDN != "" {
+		return nil
+	}
+	dn, password := "", ""
+	if cred, ok := CredentialFrom(ctx); ok {
+		dn, password = cred.DN, cred.Password
+	}
+	if err := Bind(c, dn, password); err != nil {
+		return fmt.Errorf("ldapx: request bind: %w", err)
+	}
+	return nil
 }
 
 func (p *Pool) healthLoop() {

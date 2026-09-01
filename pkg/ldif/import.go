@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/liut/ldapact/pkg/authn"
 	"github.com/liut/ldapact/pkg/web"
 )
 
@@ -66,7 +67,7 @@ func NewImportHandler(adder EntryAdder, renderer *web.Renderer, logger *slog.Log
 // Form renders the import page.
 func (h *ImportHandler) Form(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := h.render.Page(w, "Import LDIF — ldapact", "import-form-content", nil); err != nil {
+	if err := h.render.PageAuth(w, "Import LDIF — ldapact", "import-form-content", nil, web.ActorFrom(r.Context())); err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
 }
@@ -143,6 +144,10 @@ func (h *ImportHandler) Submit(w http.ResponseWriter, r *http.Request) {
 			attrs[a.Name] = a.Values
 		}
 		if err := h.adder.Add(r.Context(), entry.DN, attrs); err != nil {
+			if authn.IsInvalidCredentials(err) {
+				authn.InvalidCredentialsRedirect(w, r)
+				return
+			}
 			result.Failures++
 			reason := "LDAP rejected the entry: " + err.Error()
 			if hint := remediationHint(err); hint != "" {
@@ -168,7 +173,7 @@ func (h *ImportHandler) Submit(w http.ResponseWriter, r *http.Request) {
 			"failures", result.Failures,
 			"dry_run", dryRun)
 	}
-	h.renderPage(w, result)
+	h.renderPage(w, r, result)
 }
 
 // Report streams the stored error report (download link from AE5).
@@ -184,9 +189,9 @@ func (h *ImportHandler) Report(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, content)
 }
 
-func (h *ImportHandler) renderPage(w http.ResponseWriter, result ImportResult) {
+func (h *ImportHandler) renderPage(w http.ResponseWriter, r *http.Request, result ImportResult) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := h.render.Page(w, "Import result — ldapact", "import-result-content", result); err != nil {
+	if err := h.render.PageAuth(w, "Import result — ldapact", "import-result-content", result, web.ActorFrom(r.Context())); err != nil {
 		h.logger.Error("render import result", "event", "web.render_failed", "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}

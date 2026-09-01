@@ -5,7 +5,6 @@ package app
 
 import (
 	"fmt"
-	"html"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -29,7 +28,8 @@ import (
 type Deps struct {
 	Logger *slog.Logger
 	LDAP   *ldapx.Client
-	Store  *session.Store
+	Store  session.Store
+	Cipher *session.CredentialCipher
 	Cfg    *config.Config
 }
 
@@ -44,6 +44,7 @@ func NewHandler(d Deps) http.Handler {
 	var importHandler *ldif.ImportHandler
 	var exportHandler *ldif.ExportHandler
 	var searchHandler *search.Handler
+	var loginHandler *authn.LoginHandler
 	if d.LDAP != nil {
 		treeBrowser = tree.NewTree(d.LDAP, renderer, d.Logger)
 		schemaBrowser = tree.NewSchemaBrowser(d.LDAP, renderer)
@@ -57,6 +58,24 @@ func NewHandler(d Deps) http.Handler {
 		exportHandler = ldif.NewExportHandler(d.LDAP, d.Logger)
 		searchHandler = search.New(d.LDAP, renderer)
 	}
+	if d.Store != nil && d.Cipher != nil {
+		serverRef := ""
+		bindDN := ""
+		if d.Cfg != nil {
+			if len(d.Cfg.LDAP.Servers) > 0 {
+				serverRef = d.Cfg.LDAP.Servers[0]
+			} else {
+				serverRef = d.Cfg.LDAP.URL
+			}
+			bindDN = d.Cfg.LDAP.BindDN
+		}
+		loginHandler = authn.NewLogin(d.Store, d.Cipher, d.LDAP, renderer, d.Logger, serverRef, bindDN)
+	}
+	rateKey := ratelimit.RemoteAddrKey
+	if d.Cfg != nil && d.Cfg.TrustProxy {
+		rateKey = ratelimit.ProxyKey
+	}
+	loginLimiter := ratelimit.NewWithKey(2, 5, rateKey)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintln(w, `{"status":"ok"}`)
@@ -72,16 +91,15 @@ func NewHandler(d Deps) http.Handler {
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		}
 	})
-	// Minimal landing for the redirect_to_login expired-session action (AE7).
-	// v1 has no credential entry (AE1 auto-bind); the page offers to continue.
-	mux.HandleFunc("GET /login", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		next := r.URL.Query().Get("next")
-		if next == "" {
-			next = "/"
-		}
-		fmt.Fprintf(w, `<!doctype html><html><head><title>Session expired — ldapact</title></head><body><main role="main"><h1>Session expired</h1><p>Your session expired. <a href="%s">Continue to ldapact</a>.</p></main></body></html>`, html.EscapeString(next))
-	})
+	if loginHandler != nil {
+		mux.Handle("GET /login", loginHandler)
+		// Tighter per-key login limiter on top of the app-wide limiter
+		// (2/s refill, burst 5): throttles password guessing without
+		// penalizing normal browsing traffic. Keyed like the global limiter
+		// (RemoteAddr, or X-Forwarded-For when LDAPADM_TRUST_PROXY=true).
+		mux.Handle("POST /login", loginLimiter.Handler(loginHandler))
+		mux.HandleFunc("POST /logout", loginHandler.Logout)
+	}
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(ldapact.Assets())))
 	if treeBrowser != nil {
 		// Go's ServeMux only allows multi-segment wildcards ({dn...}) as the
@@ -116,14 +134,12 @@ func NewHandler(d Deps) http.Handler {
 	}
 
 	var h http.Handler = mux
-	h = ratelimit.New(60, 120).Handler(h)
+	h = ratelimit.NewWithKey(60, 120, rateKey).Handler(h)
+	h = authn.Middleware(authn.MiddlewareOptions{Store: d.Store, Cipher: d.Cipher, Logger: d.Logger})(h)
+	// CSRF runs before the session middleware so a rejected cross-origin
+	// state change never mutates session state (rotation happens in the
+	// middleware and would otherwise precede the Origin check).
 	h = authn.CSRF(d.Logger)(h)
-	sessOpts := authn.MiddlewareOptions{Store: d.Store, Logger: d.Logger}
-	if d.Cfg != nil {
-		sessOpts.ExpiredAction = d.Cfg.Session.ExpiredAction
-		sessOpts.Profile = d.Cfg.LDAP.BindDN
-	}
-	h = authn.Middleware(sessOpts)(h)
 	h = secheaders.Middleware(h)
 	h = logging.RequestID(h)
 	h = logging.Recover(d.Logger)(h)

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -32,6 +33,7 @@ var (
 	envLogger *slog.Logger
 	envServer *httptest.Server
 	envInst   *testldap.Instance
+	envHTTP   *http.Client
 )
 
 func TestMain(m *testing.M) {
@@ -55,6 +57,12 @@ func startEnv(ctx context.Context) {
 	envCtx, envCancel = context.WithCancel(ctx)
 	envCfg = envInst.Config()
 	envCfg.LDAP.PoolSize = 4
+	// U5: the client pool is unbound; seeding carries the admin bind
+	// credential in the context (the login gate supplies it in production).
+	envCtx = ldapx.WithCredential(envCtx, ldapx.BindCredential{
+		DN:       envCfg.LDAP.BindDN,
+		Password: envInst.AdminPassword,
+	})
 	envLogBuf = &bytes.Buffer{}
 	envLogger = slog.New(slog.NewJSONHandler(envLogBuf, nil))
 	var err error
@@ -68,12 +76,23 @@ func startEnv(ctx context.Context) {
 	if err != nil {
 		panic(err)
 	}
+	cipher, err := session.NewCredentialCipher("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	if err != nil {
+		panic(err)
+	}
 	envServer = httptest.NewServer(app.NewHandler(app.Deps{
 		Logger: envLogger,
 		LDAP:   envClient,
 		Store:  store,
+		Cipher: cipher,
 		Cfg:    envCfg,
 	}))
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		panic(err)
+	}
+	envHTTP = envServer.Client()
+	envHTTP.Jar = jar
 }
 
 func stopEnv() {
@@ -135,7 +154,7 @@ func seed() {
 // client returns an HTTP client that follows the session cookie and sends the
 // same-origin header required by the CSRF middleware.
 func client() *http.Client {
-	return envServer.Client()
+	return envHTTP
 }
 
 func serverURL() string { return envServer.URL }

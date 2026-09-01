@@ -36,6 +36,7 @@ func TestIntegrationImportExportSearch(t *testing.T) {
 		t.Fatalf("connect: %v", err)
 	}
 	defer client.Close()
+	adminCtx := ldapx.WithCredential(ctx, ldapx.BindCredential{DN: inst.Config().LDAP.BindDN, Password: inst.AdminPassword})
 
 	// F4: import entries through the handler; one entry violates schema
 	// (missing required sn) and should fail while others succeed (AE5).
@@ -64,6 +65,7 @@ cn: bad
 	rr := httptest.NewRecorder()
 	impReq := httptest.NewRequest(http.MethodPost, "/import", &buf)
 	impReq.Header.Set("Content-Type", mw.FormDataContentType())
+	impReq = impReq.WithContext(adminCtx)
 	imp.Submit(rr, impReq)
 	body := rr.Body.String()
 	if !strings.Contains(body, "Success: <strong>2</strong>") || !strings.Contains(body, "Failed: <strong>1</strong>") {
@@ -74,6 +76,7 @@ cn: bad
 	exp := NewExportHandler(client, logger)
 	rr = httptest.NewRecorder()
 	expReq := httptest.NewRequest(http.MethodGet, "/api/export?dn=dc=example,dc=com&scope=subtree", nil)
+	expReq = expReq.WithContext(adminCtx)
 	exp.Export(rr, expReq)
 	export := rr.Body.String()
 	for _, want := range []string{"dn: cn=alice,dc=example,dc=com", "dn: cn=bob,dc=example,dc=com"} {

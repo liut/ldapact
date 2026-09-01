@@ -66,12 +66,12 @@ func NewSchema() *Schema {
 	}
 }
 
-// loadSchema fetches the subschema subentry and caches it. Failure is
-// fail-fast: the process must not start with an empty schema cache (R14).
+// loadSchema fetches the subschema subentry and caches it. It runs with the
+// request-scoped credential of the first authenticated operation (U5).
 func (c *Client) loadSchema(ctx context.Context) error {
 	req := ldap.NewSearchRequest("", ldap.ScopeBaseObject, ldap.NeverDerefAliases,
 		0, 0, false, "(objectClass=*)", []string{"subschemaSubentry"}, nil)
-	res, err := c.Search(ctx, req)
+	res, err := c.search(ctx, req)
 	if err != nil {
 		return fmt.Errorf("ldapx: fetch root DSE: %w", err)
 	}
@@ -86,7 +86,7 @@ func (c *Client) loadSchema(ctx context.Context) error {
 	subReq := ldap.NewSearchRequest(subDN, ldap.ScopeBaseObject, ldap.NeverDerefAliases,
 		0, 0, false, "(objectClass=*)",
 		[]string{"objectClasses", "attributeTypes", "ldapSyntaxes", "matchingRules"}, nil)
-	subRes, err := c.Search(ctx, subReq)
+	subRes, err := c.search(ctx, subReq)
 	if err != nil {
 		return fmt.Errorf("ldapx: fetch subschema %s: %w", subDN, err)
 	}
@@ -99,6 +99,31 @@ func (c *Client) loadSchema(ctx context.Context) error {
 	}
 	c.schema = s
 	return nil
+}
+
+// ensureSchema lazily loads the subschema cache on first use, guarded by the
+// client mutex (concurrent first requests load once). A failed load is not
+// cached — the next operation retries.
+func (c *Client) ensureSchema(ctx context.Context) error {
+	c.mu.RLock()
+	loaded := c.schema != nil
+	c.mu.RUnlock()
+	if loaded {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.schema != nil {
+		return nil
+	}
+	return c.loadSchema(ctx)
+}
+
+// EnsureSchema loads the subschema cache if needed; the login flow calls it
+// with the verified bind credential so schema pages work from the first
+// request.
+func (c *Client) EnsureSchema(ctx context.Context) error {
+	return c.ensureSchema(ctx)
 }
 
 // Schema returns the cached subschema.

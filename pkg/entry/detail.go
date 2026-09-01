@@ -107,7 +107,7 @@ func (h *Handler) Detail(w http.ResponseWriter, r *http.Request) {
 		}
 		data.Attributes = append(data.Attributes, DetailAttr{Name: a.Name, Values: a.Values})
 	}
-	h.renderPage(w, e.DN+" — ldapact", "entry-detail-content", data)
+	h.renderPage(w, r, e.DN+" — ldapact", "entry-detail-content", data)
 }
 
 // rdnValue returns the first RDN attribute value (label).

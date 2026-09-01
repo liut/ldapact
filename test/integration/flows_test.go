@@ -43,14 +43,51 @@ func body(t *testing.T, resp *http.Response) string {
 	return string(b)
 }
 
+// login authenticates as the configured admin; the shared cookie jar keeps
+// the session cookie for every later request (login gate, U6).
+func login(t *testing.T) {
+	t.Helper()
+	if alreadyLoggedIn(t) {
+		return // reuse the shared session instead of re-hitting /login
+	}
+	form := url.Values{
+		"bind_dn":  {envCfg.LDAP.BindDN},
+		"password": {envInst.AdminPassword},
+		"next":     {"/"},
+	}
+	resp := do(t, http.MethodPost, "/login", form)
+	defer resp.Body.Close()
+	// The test client follows the post-login redirect to "/", so a
+	// successful login lands on the authenticated home page (200) or stops
+	// at the 302 when redirects are disabled.
+	if resp.StatusCode != http.StatusFound && resp.StatusCode != http.StatusOK {
+		t.Fatalf("login = %d: %.300s", resp.StatusCode, body(t, resp))
+	}
+}
+
+// alreadyLoggedIn reports whether the shared cookie jar already holds a
+// session cookie. The flow tests share one server and one limiter, so
+// skipping redundant logins keeps the suite under the /login rate limit
+// (2/s, burst 5) while preserving a valid session for every later request.
+func alreadyLoggedIn(t *testing.T) bool {
+	t.Helper()
+	u, err := url.Parse(serverURL())
+	if err != nil {
+		t.Fatalf("parse server URL: %v", err)
+	}
+	return len(client().Jar.Cookies(u)) > 0
+}
+
 // TestFlowF1TreeBrowse: home scaffold + paged children (AE1/AE2 mechanics).
 func TestFlowF1TreeBrowse(t *testing.T) {
+	login(t)
 	resp := do(t, http.MethodGet, "/", nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("home = %d", resp.StatusCode)
 	}
 	home := body(t, resp)
-	for _, want := range []string{`role="tree"`, "dc=example,dc=com", "Import LDIF", "Search", "Schema"} {
+	for _, want := range []string{`role="tree"`, "dc=example,dc=com", "Import LDIF", "Search", "Schema",
+		`action="/logout"`, "Logged in as"} {
 		if !strings.Contains(home, want) {
 			t.Errorf("home missing %q", want)
 		}
@@ -91,6 +128,7 @@ func TestFlowF1TreeBrowse(t *testing.T) {
 
 // TestFlowF2CreateAE3: template form + create + bind (AE3) and audit (AE6).
 func TestFlowF2CreateAE3(t *testing.T) {
+	login(t)
 	resp := do(t, http.MethodGet, "/template/posixAccount", nil)
 	form := body(t, resp)
 	for _, want := range []string{"Generic: User Account", "uidNumber", "gidNumber", "LDAPAutofill.bind"} {
@@ -122,6 +160,7 @@ func TestFlowF2CreateAE3(t *testing.T) {
 
 // TestFlowF3PasswordAE4: change password then bind with the new one.
 func TestFlowF3PasswordAE4(t *testing.T) {
+	login(t)
 	resp := do(t, http.MethodPost, "/entry/uid=u0001,ou=People,dc=example,dc=com/password", url.Values{
 		"new_password": {"Changed#2026"}, "confirm_password": {"Changed#2026"},
 	})
@@ -140,6 +179,7 @@ func TestFlowF3PasswordAE4(t *testing.T) {
 
 // TestFlowF4ImportAE5: partial-success import.
 func TestFlowF4ImportAE5(t *testing.T) {
+	login(t)
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 	fw, _ := mw.CreateFormFile("ldif", "in.ldif")
@@ -170,6 +210,7 @@ cn: badimport
 
 // TestFlowF5F6: rename then delete the renamed entry.
 func TestFlowF5F6(t *testing.T) {
+	login(t)
 	resp := do(t, http.MethodPost, "/entry/uid=u0002,ou=People,dc=example,dc=com/rename", url.Values{
 		"new_rdn": {"uid=u0002r"}, "delete_old_rdn": {"1"},
 	})
@@ -186,6 +227,7 @@ func TestFlowF5F6(t *testing.T) {
 
 // TestFlowF7F8: export subtree + search.
 func TestFlowF7F8(t *testing.T) {
+	login(t)
 	resp := do(t, http.MethodGet, "/api/export?dn=ou=Services,dc=example,dc=com&scope=subtree", nil)
 	export := body(t, resp)
 	if !strings.Contains(export, "dn: cn=import1,ou=Services,dc=example,dc=com") {
@@ -206,6 +248,7 @@ func TestFlowF7F8(t *testing.T) {
 // TestFlowEditSearch closes the R1/R2 loop: detail → edit → review → apply →
 // verify, plus the R4 search scopes and sort against the seeded tree.
 func TestFlowEditSearch(t *testing.T) {
+	login(t)
 	dn := "uid=u0005,ou=People,dc=example,dc=com"
 
 	// Detail page names the matched modification template.

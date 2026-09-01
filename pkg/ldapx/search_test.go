@@ -64,8 +64,19 @@ func (f *pagingFake) Search(req *ldap.SearchRequest) (*ldap.SearchResult, error)
 func pagingClient(t *testing.T) *Client {
 	t.Helper()
 	f := &pagingFake{pageSize: 2}
-	p := newTestPool(f)
-	return &Client{pool: p, baseDN: "dc=example,dc=com"}
+	return schemaLoadedClient(newTestPool(f), "dc=example,dc=com")
+}
+
+// schemaLoadedClient preloads the schema cache so unit tests exercise paging
+// and search logic without a real schema round-trip (the lazy load is tested
+// separately against the integration backend).
+func schemaLoadedClient(p *Pool, baseDN string) *Client {
+	return &Client{pool: singleReplica(p), baseDN: baseDN, schema: NewSchema()}
+}
+
+// singleReplica wraps one pool in a one-entry replica layer for unit tests.
+func singleReplica(p *Pool) *Replicas {
+	return &Replicas{pools: []*Pool{p}, urls: []string{"ldap://test.invalid:389"}}
 }
 
 func TestPageFirstPage(t *testing.T) {
@@ -140,7 +151,7 @@ func TestPageDefaults(t *testing.T) {
 
 func TestPageSortControlAttached(t *testing.T) {
 	f := &pagingFake{pageSize: 2}
-	c := &Client{pool: newTestPool(f), baseDN: "dc=example,dc=com"}
+	c := schemaLoadedClient(newTestPool(f), "dc=example,dc=com")
 	_, err := c.Page(context.Background(), SearchOptions{
 		Scope: ldap.ScopeSingleLevel, PageSize: 2,
 		Sort: &SortSpec{Attribute: "modifyTimestamp", Reverse: true},
@@ -158,7 +169,7 @@ func TestPageSortControlAttached(t *testing.T) {
 
 func TestPageSortControlAbsentByDefault(t *testing.T) {
 	f := &pagingFake{pageSize: 2}
-	c := &Client{pool: newTestPool(f), baseDN: "dc=example,dc=com"}
+	c := schemaLoadedClient(newTestPool(f), "dc=example,dc=com")
 	if _, err := c.Page(context.Background(), SearchOptions{Scope: ldap.ScopeSingleLevel, PageSize: 2}, 1); err != nil {
 		t.Fatalf("Page: %v", err)
 	}
@@ -169,7 +180,7 @@ func TestPageSortControlAbsentByDefault(t *testing.T) {
 
 func TestPageSortFallbackOnRejection(t *testing.T) {
 	f := &pagingFake{pageSize: 2, rejectSort: true}
-	c := &Client{pool: newTestPool(f), baseDN: "dc=example,dc=com"}
+	c := schemaLoadedClient(newTestPool(f), "dc=example,dc=com")
 	res, err := c.Page(context.Background(), SearchOptions{
 		Scope: ldap.ScopeSingleLevel, PageSize: 2,
 		Sort: &SortSpec{Attribute: "modifyTimestamp", Reverse: true},
@@ -187,7 +198,7 @@ func TestPageSortFallbackOnRejection(t *testing.T) {
 
 func TestPageSortFallbackOnResultControl(t *testing.T) {
 	f := &pagingFake{pageSize: 2, sortResultFail: true}
-	c := &Client{pool: newTestPool(f), baseDN: "dc=example,dc=com"}
+	c := schemaLoadedClient(newTestPool(f), "dc=example,dc=com")
 	res, err := c.Page(context.Background(), SearchOptions{
 		Scope: ldap.ScopeSingleLevel, PageSize: 2,
 		Sort: &SortSpec{Attribute: "modifyTimestamp"},
@@ -213,7 +224,7 @@ func TestSearchWrapsLDAPError(t *testing.T) {
 	f := &fakeConn{searchFn: func(*ldap.SearchRequest) (*ldap.SearchResult, error) {
 		return nil, ldap.NewError(32, errors.New("no such object"))
 	}}
-	c := &Client{pool: newTestPool(f), baseDN: "dc=example,dc=com"}
+	c := schemaLoadedClient(newTestPool(f), "dc=example,dc=com")
 	req := ldap.NewSearchRequest("dc=example,dc=com", ldap.ScopeBaseObject, ldap.NeverDerefAliases, 0, 0, false, "(objectClass=*)", nil, nil)
 	_, err := c.Search(context.Background(), req)
 	var lerr *LDAPError
@@ -226,7 +237,7 @@ func TestSearchWrapsLDAPError(t *testing.T) {
 }
 
 func TestSearchAutoWithoutPool(t *testing.T) {
-	c := &Client{pool: newTestPool()}
+	c := &Client{pool: singleReplica(newTestPool())}
 	req := ldap.NewSearchRequest("", ldap.ScopeBaseObject, ldap.NeverDerefAliases, 0, 0, false, "(objectClass=*)", nil, nil)
 	if _, err := c.SearchAuto(context.Background(), req); !errors.Is(err, ErrPoolClosed) {
 		t.Fatalf("want ErrPoolClosed, got %v", err)

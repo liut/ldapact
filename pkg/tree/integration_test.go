@@ -32,8 +32,9 @@ func TestIntegrationTreeAndSchema(t *testing.T) {
 		t.Fatalf("connect: %v", err)
 	}
 	defer client.Close()
+	adminCtx := ldapx.WithCredential(ctx, ldapx.BindCredential{DN: inst.Config().LDAP.BindDN, Password: inst.AdminPassword})
 
-	seed(t, ctx, client)
+	seed(t, adminCtx, client)
 
 	renderer := web.New(web.MustParse(nil))
 	tree := NewTree(client, renderer, logger)
@@ -42,6 +43,7 @@ func TestIntegrationTreeAndSchema(t *testing.T) {
 	rr := httptest.NewRecorder()
 	rootReq := httptest.NewRequest(http.MethodGet, "/api/tree/dc=example,dc=com/children?page=1&level=2", nil)
 	rootReq.SetPathValue("dn", "dc=example,dc=com")
+	rootReq = rootReq.WithContext(adminCtx)
 	tree.Children(rr, rootReq)
 	body := rr.Body.String()
 	for _, want := range []string{">People<", ">Groups<", `aria-expanded="false"`} {
@@ -54,12 +56,14 @@ func TestIntegrationTreeAndSchema(t *testing.T) {
 	rr = httptest.NewRecorder()
 	leafReq := httptest.NewRequest(http.MethodGet, "/api/tree/cn=alice,ou=People,dc=example,dc=com/children", nil)
 	leafReq.SetPathValue("dn", "cn=alice,ou=People,dc=example,dc=com")
+	leafReq = leafReq.WithContext(adminCtx)
 	tree.Children(rr, leafReq)
 	if !strings.Contains(rr.Body.String(), "(no children)") {
 		t.Errorf("leaf branch: %s", rr.Body.String())
 	}
 
-	// Schema cache came up with the core schema (R5).
+	// Schema cache loaded lazily on the first authenticated page (U5) and
+	// now carries the core schema (R5).
 	schema := client.Schema()
 	if _, ok := schema.ObjectClass("person"); !ok {
 		t.Error("schema cache missing person objectClass")

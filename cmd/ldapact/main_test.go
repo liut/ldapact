@@ -1,16 +1,141 @@
 package main
 
 import (
-	"html"
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/liut/ldapact/internal/app"
+	"github.com/liut/ldapact/pkg/config"
+	"github.com/liut/ldapact/pkg/session"
 )
+
+func testSessionCfg() *config.Config {
+	return &config.Config{
+		Session: config.SessionConfig{
+			TimeoutMinutes:         30,
+			AbsoluteTimeoutMinutes: 480,
+		},
+	}
+}
+
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func TestNewSessionStoreMemoryIgnoresDBPath(t *testing.T) {
+	cfg := testSessionCfg()
+	cfg.Session.Store = config.SessionStoreMemory
+	cfg.Session.DBPath = "/definitely/not/used/sessions.db"
+	s, err := newSessionStore(context.Background(), cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("newSessionStore(memory): %v", err)
+	}
+	defer s.Close()
+	if _, err := s.Create("id", "cn=admin,dc=example,dc=com", "ldap://replica-1", []byte("enc")); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, err := s.Get("id"); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+}
+
+func TestNewSessionStoreBboltUsesDBPath(t *testing.T) {
+	cfg := testSessionCfg()
+	cfg.Session.Store = config.SessionStoreBbolt
+	cfg.Session.DBPath = t.TempDir() + "/sessions.db"
+	s, err := newSessionStore(context.Background(), cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("newSessionStore(bbolt): %v", err)
+	}
+	defer s.Close()
+	if _, err := s.Create("persist", "p", "srv", nil); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := newSessionStore(context.Background(), cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer reopened.Close()
+	if _, err := reopened.Get("persist"); err != nil {
+		t.Errorf("bbolt session must survive reopen (R17): %v", err)
+	}
+}
+
+func TestNewSessionStoreRedisUnreachableFails(t *testing.T) {
+	cfg := testSessionCfg()
+	cfg.Session.Store = config.SessionStoreRedis
+	cfg.SessionStoreExplicit = true // explicit redis stays fail-fast
+	cfg.Session.RedisURL = "redis://redis.invalid:6379"
+	if _, err := newSessionStore(context.Background(), cfg, discardLogger()); err == nil {
+		t.Fatal("want fail-fast error when Redis is unreachable")
+	}
+}
+
+func TestNewSessionStoreRedisLoopbackFallback(t *testing.T) {
+	cfg := testSessionCfg()
+	cfg.Session.Store = config.SessionStoreRedis // defaulted, not explicit
+	cfg.Session.RedisURL = "redis://127.0.0.1:1" // closed loopback port
+	s, err := newSessionStore(context.Background(), cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("loopback Redis down must fall back to memory, got %v", err)
+	}
+	defer s.Close()
+	if _, ok := s.(*session.MemoryStore); !ok {
+		t.Fatalf("fallback store type = %T, want *session.MemoryStore", s)
+	}
+	if _, err := s.Create("id", "p", "srv", nil); err != nil {
+		t.Fatalf("Create on fallback store: %v", err)
+	}
+}
+
+func TestNewSessionStoreRedisEmptyURLFallback(t *testing.T) {
+	cfg := testSessionCfg()
+	cfg.Session.Store = config.SessionStoreRedis // defaulted
+	// No Redis URL at all: fall back to memory (config.Load also does this
+	// at validation time; this covers direct construction).
+	s, err := newSessionStore(context.Background(), cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("empty Redis URL must fall back to memory, got %v", err)
+	}
+	defer s.Close()
+	if _, ok := s.(*session.MemoryStore); !ok {
+		t.Fatalf("fallback store type = %T, want *session.MemoryStore", s)
+	}
+}
+
+func TestNewSessionStoreRedisRemoteFailsFast(t *testing.T) {
+	cfg := testSessionCfg()
+	cfg.Session.Store = config.SessionStoreRedis        // defaulted
+	cfg.Session.RedisURL = "redis://redis.invalid:6379" // remote: no fallback
+	if _, err := newSessionStore(context.Background(), cfg, discardLogger()); err == nil {
+		t.Fatal("remote Redis unreachable must fail fast (no memory fallback)")
+	}
+}
+
+func TestRedisURLForLogRedactsUserinfo(t *testing.T) {
+	got := redisURLForLog("redis://:s3cr3t@127.0.0.1:6379")
+	if got != "redis://127.0.0.1:6379" {
+		t.Errorf("redisURLForLog = %q, want host-only view without the password", got)
+	}
+	if strings.Contains(got, "s3cr3t") {
+		t.Error("redisURLForLog leaked the password")
+	}
+	if got := redisURLForLog("rediss://redis.example:6380"); got != "rediss://redis.example:6380" {
+		t.Errorf("plain URL = %q", got)
+	}
+	if got := redisURLForLog("not a url"); got != "<invalid-redis-url>" {
+		t.Errorf("invalid URL = %q, want <invalid-redis-url>", got)
+	}
+}
 
 func TestNewHandlerHealthz(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -56,6 +181,45 @@ func TestNewHandlerCSRFInChain(t *testing.T) {
 	}
 }
 
+// TestCSRFRejectedRequestDoesNotRotateSession guards the chain ordering:
+// CSRF must run before the session middleware so a rejected cross-origin
+// state change never rotates (or otherwise mutates) the session.
+func TestCSRFRejectedRequestDoesNotRotateSession(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	store := session.NewMemoryStore(30*time.Minute, 8*time.Hour)
+	t.Cleanup(func() { store.Close() })
+	cipher, err := session.NewCredentialCipher("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := session.NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(id, "cn=admin,dc=example,dc=com", "srv", []byte("enc")); err != nil {
+		t.Fatal(err)
+	}
+
+	h := app.NewHandler(app.Deps{Logger: logger, Store: store, Cipher: cipher})
+	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
+	req.Host = "ldapact.example"
+	req.Header.Set("Origin", "http://attacker.example")
+	req.AddCookie(&http.Cookie{Name: session.CookieName, Value: id})
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin POST = %d, want 403", rr.Code)
+	}
+	if _, err := store.Get(id); err != nil {
+		t.Fatalf("session must survive a CSRF-rejected request, got %v", err)
+	}
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == session.CookieName {
+			t.Error("CSRF-rejected request must not set a new session cookie")
+		}
+	}
+}
+
 func TestNewHandlerHomePage(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	rr := httptest.NewRecorder()
@@ -85,15 +249,35 @@ func TestNewHandlerStaticAssets(t *testing.T) {
 	}
 }
 
-func TestNewHandlerLoginLanding(t *testing.T) {
+func TestNewHandlerLoginGate(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	store := session.NewMemoryStore(30*time.Minute, 8*time.Hour)
+	defer store.Close()
+	cipher, err := session.NewCredentialCipher("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deps := app.Deps{Logger: logger, Store: store, Cipher: cipher}
+
+	// The login gate redirects unauthenticated requests to /login.
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/login?next=%2Fprotected", nil)
-	app.NewHandler(app.Deps{Logger: logger}).ServeHTTP(rr, req)
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	app.NewHandler(deps).ServeHTTP(rr, req)
+	if rr.Code != http.StatusFound {
+		t.Fatalf("gate code = %d, want 302", rr.Code)
+	}
+	if !strings.HasPrefix(rr.Header().Get("Location"), "/login?next=") {
+		t.Errorf("gate Location = %q", rr.Header().Get("Location"))
+	}
+
+	// The login page renders with the next target preserved.
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/login?next=%2Fprotected", nil)
+	app.NewHandler(deps).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("login code = %d", rr.Code)
 	}
-	if !strings.Contains(rr.Body.String(), html.EscapeString("/protected")) {
-		t.Errorf("login page missing next link: %s", rr.Body.String())
+	if !strings.Contains(rr.Body.String(), `value="/protected"`) {
+		t.Errorf("login page missing next target: %s", rr.Body.String())
 	}
 }

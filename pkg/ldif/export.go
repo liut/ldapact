@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-ldap/ldap/v3"
+	"github.com/liut/ldapact/pkg/authn"
 	"github.com/liut/ldapact/pkg/ldapx"
 )
 
@@ -58,7 +59,7 @@ func (h *ExportHandler) Export(w http.ResponseWriter, r *http.Request) {
 			0, 0, false, "(objectClass=*)", []string{"*"}, nil)
 		res, err := h.client.Search(r.Context(), req)
 		if err != nil {
-			h.writeError(w, err)
+			h.writeError(w, r, err)
 			return
 		}
 		if len(res.Entries) == 0 {
@@ -112,7 +113,11 @@ func (h *ExportHandler) Export(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *ExportHandler) writeError(w http.ResponseWriter, err error) {
+func (h *ExportHandler) writeError(w http.ResponseWriter, r *http.Request, err error) {
+	if authn.IsInvalidCredentials(err) {
+		authn.InvalidCredentialsRedirect(w, r)
+		return
+	}
 	h.logger.Error("export failed", "event", "ldif.export_error", "error", err)
 	http.Error(w, "Directory error", http.StatusBadGateway)
 }

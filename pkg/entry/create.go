@@ -91,7 +91,7 @@ func (h *Handler) CreateForm(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	h.renderPage(w, tmpl.Title+" — ldapact", "create-form-content", data)
+	h.renderPage(w, r, tmpl.Title+" — ldapact", "create-form-content", data)
 }
 
 // CreateSubmit handles POST /template/{name}/create (F2 submit).
@@ -153,6 +153,9 @@ func (h *Handler) CreateSubmit(w http.ResponseWriter, r *http.Request) {
 		h.client.Schema().CanonicalAttributes(attrs)
 	}
 	if err := h.client.Add(r.Context(), dn, attrs); err != nil {
+		if handleInvalidCredentials(w, r, err) {
+			return
+		}
 		h.logger.Warn("create failed", "event", "ldap.error", "dn", dn, "error", err)
 		errorsMap["_form"] = friendlyCreateError(err)
 		h.renderCreateErrors(w, r, tmpl, container, values, errorsMap)
@@ -160,7 +163,7 @@ func (h *Handler) CreateSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	h.audit(r, "ldap.create", dn, "add")
 	w.Header().Set("X-Mutated-Subtree", container)
-	h.renderPage(w, "Entry created — ldapact", "result-page", ResultData{
+	h.renderPage(w, r, "Entry created — ldapact", "result-page", ResultData{
 		Title:    "Entry created",
 		Message:  fmt.Sprintf("Created %s", dn),
 		Link:     "/entry/" + url.PathEscape(dn),
@@ -236,7 +239,7 @@ func (h *Handler) renderCreateErrors(w http.ResponseWriter, r *http.Request, tmp
 			}
 		}
 	}
-	h.renderPage(w, tmpl.Title+" — ldapact", "create-form-content", data)
+	h.renderPage(w, r, tmpl.Title+" — ldapact", "create-form-content", data)
 }
 
 func fieldIndex(tmpl *tplengine.Template, id string) int {

@@ -40,7 +40,7 @@ custom creation templates keep working, and renders the UI with Go
 make build            # CGO_ENABLED=0 single binary -> bin/ldapact
 make dist             # cross-platform release binaries under dist/
 make test             # unit + integration tests (integration skips when no backend detected)
-make test-integration # end-to-end F1-F8 vs the detected backend
+make test-integration # unit + gated integration tests (LDAP/Redis backends, incl. F1-F8)
 make test-js          # node test/js/*_test.js
 make lint             # gofmt + go vet + golangci-lint + govulncheck
 make tools            # install golangci-lint + govulncheck (lint prerequisites)
@@ -112,15 +112,20 @@ parse failure at startup — don't weaken that.
 ### Config and secrets
 
 - All runtime config comes from `LDAPADM_*` env vars via envconfig; no config file.
-- Secrets (bind / auto-number password) resolve: env var → file (mode must be
-  `0600`) → interactive TTY prompt. Never put secrets in config structs or logs.
+- Secrets (`LDAPADM_SESSION_KEY`, Redis / auto-number passwords) resolve:
+  env var → file (mode must be `0600`) only. There is no interactive TTY
+  prompt — this is a server process, and a missing secret fails fast at
+  startup. Never put secrets in config structs or logs.
 - Unknown `LDAPADM_*` variables are ignored; a set-but-empty value is parsed
   as-is (numeric/boolean fields fail at parse time naming the variable).
 
 ### Security invariants (do not weaken)
 
-- Fail-fast startup bind: refuses to start when the directory is unreachable
-  or the certificate is expired.
+- Fail-fast startup: refuses to start when every LDAP replica is
+  unreachable, a replica certificate is expired (fail-closed), or the
+  configured session store is unreachable. At least one reachable replica is
+  sufficient to start; replicas down at startup are retried in the
+  background.
 - TLS 1.2 floor, mandatory verification, StartTLS-only for `ldap://`.
 - Sessions: 256-bit opaque IDs, `__Host-LDAPADM_SID` (Secure/HttpOnly/
   SameSite=Strict), bbolt store, idle + absolute timeouts, rotation on state
