@@ -185,7 +185,10 @@ func InvalidCredentialsRedirect(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	session.Clear(w)
-	http.Redirect(w, r, "/login", http.StatusFound)
+	// Carry the intended destination so a directory password change drops
+	// the user back where they were, matching the expiry redirect.
+	next := url.QueryEscape(r.URL.RequestURI())
+	http.Redirect(w, r, "/login?next="+next, http.StatusFound)
 }
 
 // rotate mints a new session ID, migrates the value (including the encrypted

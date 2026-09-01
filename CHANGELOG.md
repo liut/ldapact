@@ -31,6 +31,42 @@ unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
   top of the app-wide limiter so a proxy-shared client bucket cannot be
   exhausted by login floods.
 
+## fix(authn): run CSRF before session rotation; keep next on re-login (2026-09-01)
+
+- The middleware chain evaluates CSRF before the session middleware, so a
+  rejected cross-origin state change never rotates or otherwise mutates the
+  session (regression test asserts no rotation on CSRF rejection).
+- `InvalidCredentialsRedirect` carries the original request URI as `next`,
+  matching the expiry redirect — a directory password change no longer loses
+  the page the admin was working on.
+
+## fix(session): serialize bbolt rotate; hash the key fingerprint (2026-09-01)
+
+- `BboltStore.Rotate` is serialized with a per-store mutex so concurrent
+  state-changing requests cannot both read the old session before either
+  deletes it (double-submit dual-live race); a concurrent-rotate test
+  asserts exactly one survivor.
+- `CredentialCipher.KeyFingerprint` is now the first 6 hex chars of the
+  SHA-256 of the key instead of raw key characters, so `key_fingerprint`
+  log lines reveal nothing about the session key.
+
+## fix(ldapx): retry bind-time network errors; align VerifyBind failover (2026-09-01)
+
+- `Pool.Do` applies the KTD-5 single retry to bind failures too: a
+  connection that drops between Get and Bind is a network-level problem,
+  not a credential problem (single-URL deployments previously got no retry
+  at bind time).
+- `Replicas.VerifyBind` now only fails over on network-level failures
+  (dial/TLS transport errors or LDAP network result codes), matching
+  `Do`/`Page`; certificate/protocol errors and `invalidCredentials` are
+  reported immediately instead of trying every replica.
+
+## refactor(config): drop dead BindPassword field (2026-09-01)
+
+- `Config.BindPassword` was no longer resolved (R15) and read nowhere in
+  production; removed the field, its stale comment, and the test-harness
+  assignment. `BindPasswordEnv` remains as the documented deprecated name.
+
 ## Logout control and identity in the header (2026-09-01)
 
 - `feat(web)` — authenticated pages now render a "Log out" button in the

@@ -135,8 +135,11 @@ func NewHandler(d Deps) http.Handler {
 
 	var h http.Handler = mux
 	h = ratelimit.NewWithKey(60, 120, rateKey).Handler(h)
-	h = authn.CSRF(d.Logger)(h)
 	h = authn.Middleware(authn.MiddlewareOptions{Store: d.Store, Cipher: d.Cipher, Logger: d.Logger})(h)
+	// CSRF runs before the session middleware so a rejected cross-origin
+	// state change never mutates session state (rotation happens in the
+	// middleware and would otherwise precede the Origin check).
+	h = authn.CSRF(d.Logger)(h)
 	h = secheaders.Middleware(h)
 	h = logging.RequestID(h)
 	h = logging.Recover(d.Logger)(h)

@@ -181,6 +181,45 @@ func TestNewHandlerCSRFInChain(t *testing.T) {
 	}
 }
 
+// TestCSRFRejectedRequestDoesNotRotateSession guards the chain ordering:
+// CSRF must run before the session middleware so a rejected cross-origin
+// state change never rotates (or otherwise mutates) the session.
+func TestCSRFRejectedRequestDoesNotRotateSession(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	store := session.NewMemoryStore(30*time.Minute, 8*time.Hour)
+	t.Cleanup(func() { store.Close() })
+	cipher, err := session.NewCredentialCipher("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := session.NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(id, "cn=admin,dc=example,dc=com", "srv", []byte("enc")); err != nil {
+		t.Fatal(err)
+	}
+
+	h := app.NewHandler(app.Deps{Logger: logger, Store: store, Cipher: cipher})
+	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
+	req.Host = "ldapact.example"
+	req.Header.Set("Origin", "http://attacker.example")
+	req.AddCookie(&http.Cookie{Name: session.CookieName, Value: id})
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin POST = %d, want 403", rr.Code)
+	}
+	if _, err := store.Get(id); err != nil {
+		t.Fatalf("session must survive a CSRF-rejected request, got %v", err)
+	}
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == session.CookieName {
+			t.Error("CSRF-rejected request must not set a new session cookie")
+		}
+	}
+}
+
 func TestNewHandlerHomePage(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	rr := httptest.NewRecorder()

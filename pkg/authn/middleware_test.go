@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -268,8 +269,11 @@ func TestInvalidCredentialsRedirectInvalidates(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/entry/x/password", nil).WithContext(ctx)
 	InvalidCredentialsRedirect(rr, req)
-	if rr.Code != http.StatusFound || rr.Header().Get("Location") != "/login" {
+	if rr.Code != http.StatusFound || !strings.HasPrefix(rr.Header().Get("Location"), "/login?next=") {
 		t.Fatalf("code=%d loc=%q", rr.Code, rr.Header().Get("Location"))
+	}
+	if loc := rr.Header().Get("Location"); !strings.Contains(loc, "entry%2Fx%2Fpassword") {
+		t.Errorf("forced re-login must carry the original destination, loc=%q", loc)
 	}
 	if _, err := store.Get(sid); err == nil {
 		t.Error("invalidCredentials must delete the session")
