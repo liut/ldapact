@@ -620,9 +620,6 @@ func TestLoadIgnoresSecretVars(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.BindPassword != "" {
-		t.Errorf("bind password parsed by envconfig: %q", cfg.BindPassword)
-	}
 	if cfg.AutoNumberPassword != "" {
 		t.Errorf("auto-number password parsed by envconfig: %q", cfg.AutoNumberPassword)
 	}
@@ -828,9 +825,6 @@ func TestResolveSecrets(t *testing.T) {
 	}
 	if cfg.SessionKey != "a2V5LWtleS1rZXkta2V5LWtleQ==" {
 		t.Errorf("session key = %q", cfg.SessionKey)
-	}
-	if cfg.BindPassword != "" {
-		t.Errorf("deprecated bind password still resolved: %q", cfg.BindPassword)
 	}
 	if cfg.RedisPassword != "redis-secret" {
 		t.Errorf("redis password = %q", cfg.RedisPassword)

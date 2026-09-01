@@ -73,8 +73,7 @@ func SecretFingerprint(s string) string {
 //   - LDAPADM_AUTO_NUMBER_PASSWORD is resolved only when AutoNumberDN is
 //     configured.
 //   - LDAPADM_BIND_PASSWORD is no longer resolved (R15): the bind credential
-//     moves to the login flow. BindPassword remains on Config only for
-//     transitional code until the ldapx pool refactor lands.
+//     moves to the login flow.
 func (c *Config) ResolveSecrets() error {
 	sk, err := ResolveSecret(SessionKeyEnv)
 	if err != nil {

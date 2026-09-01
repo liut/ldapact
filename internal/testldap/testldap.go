@@ -76,7 +76,6 @@ func (i *Instance) Config() *config.Config {
 	cfg.LDAP.URL = i.URL
 	cfg.LDAP.BaseDN = i.BaseDN
 	cfg.LDAP.BindDN = i.AdminDN
-	cfg.BindPassword = i.AdminPassword
 	cfg.LDAP.PoolSize = 2
 	if !i.SupportsSSHA512 {
 		cfg.LDAP.PasswordScheme = "SSHA"

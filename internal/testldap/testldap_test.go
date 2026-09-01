@@ -46,7 +46,7 @@ func TestStartSmoke(t *testing.T) {
 func TestConfigPointers(t *testing.T) {
 	inst := &Instance{URL: "ldap://127.0.0.1:1389", AdminDN: AdminDN, AdminPassword: AdminPassword, BaseDN: BaseDN}
 	cfg := inst.Config()
-	if cfg.LDAP.URL != inst.URL || cfg.LDAP.BindDN != AdminDN || cfg.BindPassword != AdminPassword {
+	if cfg.LDAP.URL != inst.URL || cfg.LDAP.BindDN != AdminDN {
 		t.Errorf("config = %+v", cfg.LDAP)
 	}
 }

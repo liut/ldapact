@@ -164,8 +164,8 @@ type ServerConfig struct {
 }
 
 // Config is the v1 server profile (R16: a plain struct, not an interface).
-// BindPassword and AutoNumberPassword are runtime-only values filled by
-// ResolveSecrets; they are never parsed from the environment.
+// AutoNumberPassword is a runtime-only value filled by ResolveSecrets; it is
+// never parsed from the environment.
 type Config struct {
 	Server       ServerConfig
 	LDAP         LDAPConfig
@@ -189,7 +189,6 @@ type Config struct {
 	// ResolveSecrets; they are never parsed from the environment.
 	SessionKey         string
 	RedisPassword      string
-	BindPassword       string
 	AutoNumberPassword string
 }
 
