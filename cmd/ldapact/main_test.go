@@ -121,6 +121,22 @@ func TestNewSessionStoreRedisRemoteFailsFast(t *testing.T) {
 	}
 }
 
+func TestRedisURLForLogRedactsUserinfo(t *testing.T) {
+	got := redisURLForLog("redis://:s3cr3t@127.0.0.1:6379")
+	if got != "redis://127.0.0.1:6379" {
+		t.Errorf("redisURLForLog = %q, want host-only view without the password", got)
+	}
+	if strings.Contains(got, "s3cr3t") {
+		t.Error("redisURLForLog leaked the password")
+	}
+	if got := redisURLForLog("rediss://redis.example:6380"); got != "rediss://redis.example:6380" {
+		t.Errorf("plain URL = %q", got)
+	}
+	if got := redisURLForLog("not a url"); got != "<invalid-redis-url>" {
+		t.Errorf("invalid URL = %q, want <invalid-redis-url>", got)
+	}
+}
+
 func TestNewHandlerHealthz(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	rr := httptest.NewRecorder()

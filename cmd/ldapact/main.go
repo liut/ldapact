@@ -113,6 +113,7 @@ func run(args []string) int {
 	logger.Info("LDAP replicas ready",
 		"event", "ldap.dial_ok",
 		"replicas", replicas,
+		"active", ldapClient.ReplicaCount(),
 		"base_dn", cfg.LDAP.BaseDN)
 
 	cipher, err := session.NewCredentialCipher(cfg.SessionKey)
@@ -184,7 +185,7 @@ func newSessionStore(ctx context.Context, cfg *config.Config, logger *slog.Logge
 			(cfg.Session.RedisURL == "" || isLoopbackRedisURL(cfg.Session.RedisURL)) {
 			logger.Warn("Redis unavailable; using in-memory session store",
 				"event", "session.redis_fallback_memory",
-				"redis_url", cfg.Session.RedisURL,
+				"redis_url", redisURLForLog(cfg.Session.RedisURL),
 				"error", err)
 			return session.NewMemoryStore(idle, absolute), nil
 		}
@@ -206,4 +207,14 @@ func isLoopbackRedisURL(raw string) bool {
 	}
 	host := u.Hostname()
 	return host == "localhost" || host == "::1" || strings.HasPrefix(host, "127.")
+}
+
+// redisURLForLog returns a log-safe view of a Redis URL: scheme + host only,
+// never the userinfo component (a password may be embedded in the URL).
+func redisURLForLog(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "<invalid-redis-url>"
+	}
+	return u.Scheme + "://" + u.Host
 }

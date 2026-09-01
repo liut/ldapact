@@ -3,6 +3,34 @@
 All notable changes to ldapact v1 are tracked here, one entry per implementation
 unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
 
+## fix(main): redact Redis URL in session fallback log (2026-09-01)
+
+- The Redis→memory fallback warning no longer logs the Redis URL verbatim;
+  only scheme + host are emitted so a password embedded in the URL cannot
+  leak into logs (`event=session.redis_fallback_memory`).
+
+## fix(session): roll back Redis rotate when persist fails (2026-09-01)
+
+- Redis session rotation is recoverable: if the post-rename persist fails,
+  the rename is rolled back so the old session ID stays valid instead of
+  stranding the user (the old key was already gone before this fix).
+
+## fix(ldapx): tolerate replica down at startup (2026-09-01)
+
+- Replica startup is tolerant: the service starts when at least one replica
+  is reachable; replicas that fail their initial dial are retried on the
+  health interval and join the rotation on recovery. All replicas down still
+  fails fast. `Client.ReplicaCount()` reports active replicas in the startup
+  log; AGENTS.md startup invariant updated to match.
+
+## feat(ratelimit): proxy-aware keying and dedicated login limiter (2026-09-01)
+
+- Limiter keying is pluggable: `RemoteAddrKey` (default) vs `ProxyKey`
+  (first `X-Forwarded-For` hop), selected by the new `LDAPADM_TRUST_PROXY`
+  config. `POST /login` gets a dedicated tighter limiter (2/s, burst 5) on
+  top of the app-wide limiter so a proxy-shared client bucket cannot be
+  exhausted by login floods.
+
 ## Logout control and identity in the header (2026-09-01)
 
 - `feat(web)` — authenticated pages now render a "Log out" button in the
