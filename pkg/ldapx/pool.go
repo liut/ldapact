@@ -155,13 +155,26 @@ func (p *Pool) Do(ctx context.Context, fn func(Conn) error) error {
 	if err != nil {
 		return err
 	}
-	if err := p.bindFor(ctx, c); err != nil {
-		c.Close()
-		return err
-	}
 	attempt := 0
 	for {
 		attempt++
+		// Bind failures get the same KTD-5 single retry as operation
+		// failures: a connection that drops between Get and Bind is a
+		// network-level problem, not a credential problem.
+		if err := p.bindFor(ctx, c); err != nil {
+			c.Close()
+			if attempt == 1 && isRetryable(err) {
+				if !waitBackoff(ctx, attempt) {
+					return ctx.Err()
+				}
+				c, err = p.getRetry(ctx, attempt)
+				if err != nil {
+					return err
+				}
+				continue
+			}
+			return err
+		}
 		err = fn(c)
 		if err == nil {
 			p.Put(c)
@@ -176,17 +189,11 @@ func (p *Pool) Do(ctx context.Context, fn func(Conn) error) error {
 				// Drop the sick connection (Put validates and closes it).
 				_ = p.Put(c)
 			}
-			select {
-			case <-time.After(backoffFor(attempt)):
-			case <-ctx.Done():
+			if !waitBackoff(ctx, attempt) {
 				return ctx.Err()
 			}
 			c, err = p.getRetry(ctx, attempt)
 			if err != nil {
-				return err
-			}
-			if err := p.bindFor(ctx, c); err != nil {
-				c.Close()
 				return err
 			}
 			continue
@@ -199,6 +206,17 @@ func (p *Pool) Do(ctx context.Context, fn func(Conn) error) error {
 		}
 		p.Put(c)
 		return err
+	}
+}
+
+// waitBackoff sleeps the KTD-5 backoff for the attempt, reporting whether
+// the caller may proceed (false when ctx was canceled).
+func waitBackoff(ctx context.Context, attempt int) bool {
+	select {
+	case <-time.After(backoffFor(attempt)):
+		return true
+	case <-ctx.Done():
+		return false
 	}
 }
 

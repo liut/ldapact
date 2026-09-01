@@ -51,7 +51,7 @@ func CredentialFrom(ctx context.Context) (BindCredential, bool) {
 // closes the connection: the login gate's credential check (R6). Invalid
 // credentials surface as an *LDAPError with result code 49.
 func VerifyBind(ctx context.Context, opts DialOptions, dn, password string) error {
-	conn, err := Dial(ctx, opts)
+	conn, err := dialConn(ctx, opts)
 	if err != nil {
 		return err
 	}

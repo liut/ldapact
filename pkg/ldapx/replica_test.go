@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
 	"testing"
@@ -17,7 +18,7 @@ func newTestReplicas(pools ...*Pool) *Replicas {
 	for i := range pools {
 		urls = append(urls, "ldap://replica-"+string(rune('a'+i))+".test:389")
 	}
-	return &Replicas{pools: pools, urls: urls}
+	return &Replicas{pools: pools, poolURLs: append([]string(nil), urls...), urls: urls}
 }
 
 func TestReplicasDoFailsOverOnNetworkError(t *testing.T) {
@@ -194,5 +195,79 @@ func TestReplicasAllDownFailsStartup(t *testing.T) {
 	}, PoolOptions{Size: 1, HealthInterval: time.Hour})
 	if err == nil || !strings.Contains(err.Error(), "all replicas failed") {
 		t.Fatalf("want aggregated all-down error, got %v", err)
+	}
+}
+
+func TestReplicasVerifyBindFailsOverOnDialError(t *testing.T) {
+	origDial := dialConn
+	attempts := 0
+	dialConn = func(_ context.Context, _ DialOptions) (Conn, error) {
+		attempts++
+		if attempts == 1 {
+			return nil, &net.OpError{Op: "dial", Err: errors.New("refused")}
+		}
+		return &fakeConn{}, nil
+	}
+	defer func() { dialConn = origDial }()
+
+	p1, p2 := newTestPool(), newTestPool()
+	p1.opts.Dial.URL = "ldap://replica-a.test:389"
+	p2.opts.Dial.URL = "ldap://replica-b.test:389"
+	r := newTestReplicas(p1, p2)
+	if err := r.VerifyBind(context.Background(), "cn=admin,dc=example,dc=com", "pw"); err != nil {
+		t.Fatalf("VerifyBind after dial failover: %v", err)
+	}
+	if attempts != 2 {
+		t.Errorf("dial attempts = %d, want 2 (fail over to the healthy replica)", attempts)
+	}
+}
+
+func TestReplicasVerifyBindNoFailoverOnAppError(t *testing.T) {
+	origDial := dialConn
+	bad := &fakeConn{bindFn: func(user, pass string) error {
+		return ldap.NewError(ldap.LDAPResultBusy, errors.New("server busy"))
+	}}
+	calls := 0
+	dialConn = func(_ context.Context, _ DialOptions) (Conn, error) {
+		calls++
+		return bad, nil
+	}
+	defer func() { dialConn = origDial }()
+
+	p1, p2 := newTestPool(), newTestPool()
+	p1.opts.Dial.URL = "ldap://replica-a.test:389"
+	p2.opts.Dial.URL = "ldap://replica-b.test:389"
+	r := newTestReplicas(p1, p2)
+	err := r.VerifyBind(context.Background(), "cn=admin,dc=example,dc=com", "pw")
+	if err == nil {
+		t.Fatal("want the busy bind error")
+	}
+	if calls != 1 {
+		t.Errorf("dial calls = %d, want 1 (app-level error must not fail over)", calls)
+	}
+}
+
+func TestReplicasVerifyBindNoFailoverOnInvalidCredentials(t *testing.T) {
+	origDial := dialConn
+	bad := &fakeConn{bindFn: func(user, pass string) error {
+		return ldap.NewError(ldap.LDAPResultInvalidCredentials, errors.New("bad creds"))
+	}}
+	calls := 0
+	dialConn = func(_ context.Context, _ DialOptions) (Conn, error) {
+		calls++
+		return bad, nil
+	}
+	defer func() { dialConn = origDial }()
+
+	p1, p2 := newTestPool(), newTestPool()
+	p1.opts.Dial.URL = "ldap://replica-a.test:389"
+	p2.opts.Dial.URL = "ldap://replica-b.test:389"
+	r := newTestReplicas(p1, p2)
+	err := r.VerifyBind(context.Background(), "cn=admin,dc=example,dc=com", "pw")
+	if !IsInvalidCredentials(err) {
+		t.Fatalf("want invalidCredentials, got %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("dial calls = %d, want 1 (invalidCredentials must never fail over)", calls)
 	}
 }

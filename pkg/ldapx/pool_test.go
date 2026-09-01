@@ -171,6 +171,29 @@ func TestPoolDoBindsAnonymousWithoutCredential(t *testing.T) {
 	}
 }
 
+func TestPoolDoRetriesBindNetworkError(t *testing.T) {
+	bad := &fakeConn{bindFn: func(user, pass string) error {
+		return ldap.NewError(ldap.ErrorNetwork, errors.New("connection lost during bind"))
+	}}
+	good := &fakeConn{}
+	p := newTestPool(bad, good)
+	ctx := WithCredential(context.Background(), BindCredential{
+		DN: "cn=admin,dc=example,dc=com", Password: "pw",
+	})
+	if err := p.Do(ctx, func(c Conn) error { return nil }); err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	if !bad.closed.Load() {
+		t.Error("sick connection must be dropped after a bind network error")
+	}
+	if good.closed.Load() {
+		t.Error("replacement connection should stay open")
+	}
+	if good.lastBindUser != "cn=admin,dc=example,dc=com" {
+		t.Errorf("replacement connection bound as %q", good.lastBindUser)
+	}
+}
+
 func TestPoolDoBindFailureDropsConn(t *testing.T) {
 	f := &fakeConn{bindFn: func(user, pass string) error {
 		return ldap.NewError(49, errors.New("invalid credentials"))

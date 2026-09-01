@@ -22,15 +22,16 @@ import (
 // when they recover. If every replica fails the initial dial, startup
 // aborts with an aggregated error (fail-fast, R15).
 type Replicas struct {
-	mu     sync.RWMutex
-	pools  []*Pool
-	urls   []string
-	failed []string // URLs whose initial dial failed; retried in the background
-	opts   PoolOptions
-	next   atomic.Uint64
-	ctx    context.Context
-	cancel context.CancelFunc
-	closed atomic.Bool
+	mu       sync.RWMutex
+	pools    []*Pool
+	poolURLs []string // aligned with pools for accurate diagnostics
+	urls     []string
+	failed   []string // URLs whose initial dial failed; retried in the background
+	opts     PoolOptions
+	next     atomic.Uint64
+	ctx      context.Context
+	cancel   context.CancelFunc
+	closed   atomic.Bool
 }
 
 // NewReplicas dials one pool per URL and starts each pool's health loop.
@@ -59,6 +60,7 @@ func NewReplicas(ctx context.Context, urls []string, opts PoolOptions) (*Replica
 			continue
 		}
 		r.pools = append(r.pools, p)
+		r.poolURLs = append(r.poolURLs, u)
 	}
 	if len(r.pools) == 0 {
 		r.cancel()
@@ -74,7 +76,7 @@ func NewReplicas(ctx context.Context, urls []string, opts PoolOptions) (*Replica
 // network-level errors. Each sub-pool already retries once internally, so a
 // full sweep is bounded at 2×replicas connection attempts.
 func (r *Replicas) Do(ctx context.Context, fn func(Conn) error) error {
-	pools := r.snapshot()
+	pools, urls := r.snapshotWithURLs()
 	if len(pools) == 0 {
 		return errors.New("ldapx: no replicas available")
 	}
@@ -92,7 +94,7 @@ func (r *Replicas) Do(ctx context.Context, fn func(Conn) error) error {
 		if !isRetryable(err) {
 			return err // application-level failure: not a replica problem
 		}
-		errs = append(errs, fmt.Errorf("%s: %w", r.urls[idx], err))
+		errs = append(errs, fmt.Errorf("%s: %w", urls[idx], err))
 	}
 	return fmt.Errorf("ldapx: all replicas failed: %w", errors.Join(errs...))
 }
@@ -101,7 +103,7 @@ func (r *Replicas) Do(ctx context.Context, fn func(Conn) error) error {
 // as Do (R11/AE4). Paged sessions are connection-scoped, so each attempt
 // re-runs the whole loop on one replica's connection.
 func (r *Replicas) Page(ctx context.Context, opts SearchOptions, page int) (*PageResult, error) {
-	pools := r.snapshot()
+	pools, urls := r.snapshotWithURLs()
 	if len(pools) == 0 {
 		return nil, errors.New("ldapx: no replicas available")
 	}
@@ -119,7 +121,7 @@ func (r *Replicas) Page(ctx context.Context, opts SearchOptions, page int) (*Pag
 		if !isRetryable(err) {
 			return nil, err
 		}
-		errs = append(errs, fmt.Errorf("%s: %w", r.urls[idx], err))
+		errs = append(errs, fmt.Errorf("%s: %w", urls[idx], err))
 	}
 	return nil, fmt.Errorf("ldapx: all replicas failed: %w", errors.Join(errs...))
 }
@@ -127,7 +129,7 @@ func (r *Replicas) Page(ctx context.Context, opts SearchOptions, page int) (*Pag
 // VerifyBind checks a credential against any available replica (login gate,
 // R6): dial + bind + close per replica, failing over on network errors only.
 func (r *Replicas) VerifyBind(ctx context.Context, dn, password string) error {
-	pools := r.snapshot()
+	pools, urls := r.snapshotWithURLs()
 	if len(pools) == 0 {
 		return errors.New("ldapx: no replicas available")
 	}
@@ -142,7 +144,12 @@ func (r *Replicas) VerifyBind(ctx context.Context, dn, password string) error {
 		if IsInvalidCredentials(err) {
 			return err
 		}
-		errs = append(errs, fmt.Errorf("%s: %w", r.urls[idx], err))
+		if !isRetryable(err) && !isDialRetryable(err) {
+			// App-level failure (certificate, protocol, busy): it will
+			// repeat on every replica, so report it instead of failing over.
+			return err
+		}
+		errs = append(errs, fmt.Errorf("%s: %w", urls[idx], err))
 	}
 	return fmt.Errorf("ldapx: all replicas failed: %w", errors.Join(errs...))
 }
@@ -178,6 +185,14 @@ func (r *Replicas) snapshot() []*Pool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return append([]*Pool(nil), r.pools...)
+}
+
+// snapshotWithURLs returns the active pools and their URLs under the read
+// lock so diagnostics never mislabel a recovered replica.
+func (r *Replicas) snapshotWithURLs() ([]*Pool, []string) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return append([]*Pool(nil), r.pools...), append([]string(nil), r.poolURLs...)
 }
 
 // Len reports the number of replicas.
@@ -236,6 +251,7 @@ func (r *Replicas) retryFailed() {
 			return
 		}
 		r.pools = append(r.pools, p)
+		r.poolURLs = append(r.poolURLs, u)
 		r.failed = removeString(r.failed, u)
 		r.mu.Unlock()
 		if r.opts.Dial.Logger != nil {

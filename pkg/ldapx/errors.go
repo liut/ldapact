@@ -5,9 +5,11 @@
 package ldapx
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"time"
 
 	"github.com/go-ldap/ldap/v3"
@@ -82,6 +84,19 @@ func isRetryable(err error) bool {
 		return le.ResultCode == ldap.ErrorNetwork || le.ResultCode == ldap.LDAPResultServerDown
 	}
 	return false
+}
+
+// isDialRetryable reports whether a dial/handshake failure is a
+// network-level transport error worth failing over to another replica.
+// Certificate/protocol failures (x509, ErrTLSCertExpired, malformed URLs)
+// are not net.Errors and will repeat on every replica, so they do not
+// qualify; canceled contexts are never failed over.
+func isDialRetryable(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var ne net.Error
+	return errors.As(err, &ne)
 }
 
 // IsInvalidCredentials reports whether err is an LDAP invalidCredentials
