@@ -1,55 +1,18 @@
 package config
 
 import (
-	"bufio"
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"strings"
-
-	"golang.org/x/term"
 )
 
-// openTTY is swappable in tests. It returns an error when no TTY is available
-// (CI, daemonized deployments), which makes the resolver fail fast instead of
-// hanging on a missing terminal.
-var openTTY = func() (io.ReadWriteCloser, error) {
-	f, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
-	if err != nil {
-		return nil, err
-	}
-	return f, nil
-}
-
-// promptSecretTTY is swappable in tests; the production implementation reads a
-// line from the controlling terminal with echo disabled. Non-terminal streams
-// (used by tests) fall back to a plain buffered read.
-var promptSecretTTY = func(prompt string) (string, error) {
-	tty, err := openTTY()
-	if err != nil {
-		return "", err
-	}
-	defer tty.Close()
-	if _, err := io.WriteString(tty, prompt); err != nil {
-		return "", err
-	}
-	if f, ok := tty.(interface{ Fd() uintptr }); ok {
-		b, err := term.ReadPassword(int(f.Fd()))
-		if err != nil {
-			return "", err
-		}
-		_, _ = io.WriteString(tty, "\n")
-		return string(b), nil
-	}
-	return scanSecretLine(tty)
-}
-
-// ResolveSecret resolves a named secret through the R12 chain:
+// ResolveSecret resolves a named secret through the service chain:
 //  1. env var <name>
 //  2. file referenced by env var <name>_FILE (mode must be 0600)
-//  3. TTY prompt (echo disabled)
 //
+// There is no interactive fallback: ldapact is a server process, so a
+// missing secret fails fast with a clear error instead of hanging on a TTY
+// prompt (systemd/container deployments have no terminal to prompt on).
 // The returned error names the chain that was attempted but never contains a
 // secret value.
 func ResolveSecret(name string) (string, error) {
@@ -60,15 +23,8 @@ func ResolveSecret(name string) (string, error) {
 	if p := os.Getenv(fileEnv); p != "" {
 		return readSecretFile(p)
 	}
-	v, err := promptSecretTTY("Enter secret " + name + ": ")
-	if err != nil {
-		return "", fmt.Errorf("resolve secret %s: no env var %s, no file ref %s, and TTY prompt failed: %w",
-			name, name, fileEnv, err)
-	}
-	if v == "" {
-		return "", fmt.Errorf("resolve secret %s: empty value from TTY prompt", name)
-	}
-	return v, nil
+	return "", fmt.Errorf("resolve secret %s: no env var %s and no file ref %s (secrets are env or 0600 file only)",
+		name, name, fileEnv)
 }
 
 // readSecretFile reads a secret from path, requiring regular-file mode 0600
@@ -143,9 +99,8 @@ func (c *Config) ResolveSecrets() error {
 }
 
 // resolveOptionalSecret resolves a secret only when its env var or _FILE
-// reference is present; an absent secret resolves to "". It never falls back
-// to a TTY prompt, so optional secrets (like a no-auth Redis) do not hang
-// startup.
+// reference is present; an absent secret resolves to "" (e.g. Redis without
+// auth).
 func resolveOptionalSecret(name string) (string, error) {
 	if v := os.Getenv(name); v != "" {
 		return v, nil
@@ -154,14 +109,4 @@ func resolveOptionalSecret(name string) (string, error) {
 		return readSecretFile(p)
 	}
 	return "", nil
-}
-
-// scanSecrets is a small helper kept for tests that need a bufio reader on a
-// secret stream without importing bufio at call sites.
-func scanSecretLine(r io.Reader) (string, error) {
-	line, err := bufio.NewReader(r).ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return "", err
-	}
-	return strings.TrimRight(line, "\r\n"), nil
 }

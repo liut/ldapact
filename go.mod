@@ -5,12 +5,13 @@ go 1.27.0
 require (
 	github.com/GehirnInc/crypt v0.0.0-20230320061759-8cc1b52080c5
 	github.com/alexedwards/argon2id v1.0.0
+	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/go-ldap/ldap/v3 v3.4.14
 	github.com/kelseyhightower/envconfig v1.4.0
+	github.com/redis/go-redis/v9 v9.22.0
 	github.com/testcontainers/testcontainers-go v0.44.0
 	go.etcd.io/bbolt v1.5.0
 	golang.org/x/crypto v0.55.0
-	golang.org/x/term v0.45.0
 )
 
 require (
@@ -18,7 +19,6 @@ require (
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/Azure/go-ntlmssp v0.1.1 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
-	github.com/alicebob/miniredis/v2 v2.37.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/containerd/errdefs v1.0.0 // indirect
@@ -53,7 +53,6 @@ require (
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
-	github.com/redis/go-redis/v9 v9.22.0 // indirect
 	github.com/shirou/gopsutil/v4 v4.26.6 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
 	github.com/stretchr/testify v1.11.1 // indirect

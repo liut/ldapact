@@ -2,7 +2,6 @@ package config
 
 import (
 	"bytes"
-	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -745,63 +744,22 @@ func TestResolveSecretFileEmpty(t *testing.T) {
 	}
 }
 
-func TestScanSecretLineEOF(t *testing.T) {
-	got, err := scanSecretLine(strings.NewReader("no-newline"))
-	if err != nil {
-		t.Fatalf("scanSecretLine: %v", err)
-	}
-	if got != "no-newline" {
-		t.Errorf("got %q", got)
-	}
-}
-
-func TestResolveSecretTTYFallback(t *testing.T) {
+func TestResolveSecretMissingFailsFast(t *testing.T) {
+	// ldapact is a server process: missing secrets fail fast instead of
+	// falling back to an interactive TTY prompt.
 	t.Setenv(BindPasswordEnv, "")
 	t.Setenv(BindPasswordEnv+"_FILE", "")
-	origOpen := openTTY
-	defer func() { openTTY = origOpen }()
-	openTTY = func() (io.ReadWriteCloser, error) {
-		return &fakeTTY{rd: strings.NewReader("tty-secret\n")}, nil
-	}
-	got, err := ResolveSecret(BindPasswordEnv)
-	if err != nil {
-		t.Fatalf("ResolveSecret: %v", err)
-	}
-	if got != "tty-secret" {
-		t.Errorf("got %q, want %q", got, "tty-secret")
-	}
-}
-
-func TestResolveSecretTTYUnavailable(t *testing.T) {
-	t.Setenv(BindPasswordEnv, "")
-	t.Setenv(BindPasswordEnv+"_FILE", "")
-	origOpen := openTTY
-	defer func() { openTTY = origOpen }()
-	openTTY = func() (io.ReadWriteCloser, error) { return nil, os.ErrNotExist }
 	_, err := ResolveSecret(BindPasswordEnv)
 	if err == nil {
-		t.Fatal("want error when no env/file/TTY")
+		t.Fatal("want error when env and file are both absent (no TTY fallback)")
 	}
-	for _, want := range []string{BindPasswordEnv, BindPasswordEnv + "_FILE", "TTY"} {
+	for _, want := range []string{BindPasswordEnv, BindPasswordEnv + "_FILE"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q missing %q", err, want)
 		}
 	}
-	if strings.Contains(err.Error(), "hunter2") {
-		t.Error("error must never contain a secret value")
-	}
-}
-
-func TestResolveSecretTTYEmpty(t *testing.T) {
-	t.Setenv(BindPasswordEnv, "")
-	t.Setenv(BindPasswordEnv+"_FILE", "")
-	origOpen := openTTY
-	defer func() { openTTY = origOpen }()
-	openTTY = func() (io.ReadWriteCloser, error) {
-		return &fakeTTY{rd: strings.NewReader("\n")}, nil
-	}
-	if _, err := ResolveSecret(BindPasswordEnv); err == nil {
-		t.Fatal("want error for empty TTY input")
+	if strings.Contains(err.Error(), "TTY") || strings.Contains(err.Error(), "hunter2") {
+		t.Error("error must not mention TTY or leak a secret value")
 	}
 }
 
@@ -854,27 +812,20 @@ func TestResolveSecrets(t *testing.T) {
 func TestResolveSecretsSessionKeyMissing(t *testing.T) {
 	t.Setenv(SessionKeyEnv, "")
 	t.Setenv(SessionKeyEnv+"_FILE", "")
-	origOpen := openTTY
-	defer func() { openTTY = origOpen }()
-	openTTY = func() (io.ReadWriteCloser, error) { return nil, os.ErrNotExist }
 	cfg := &Config{Session: SessionConfig{Store: SessionStoreBbolt}}
 	if err := cfg.ResolveSecrets(); err == nil {
 		t.Fatal("want session-key resolution failure")
+	} else if !strings.Contains(err.Error(), SessionKeyEnv) {
+		t.Errorf("error %q must name the missing secret", err)
 	}
 }
 
 func TestResolveSecretsRedisPasswordOptional(t *testing.T) {
-	// Redis without auth: no env var, no file reference, no TTY prompt — the
-	// optional resolver must return empty without failing.
+	// Redis without auth: no env var, no file reference — the optional
+	// resolver must return empty without failing.
 	t.Setenv(SessionKeyEnv, "a2V5LWtleS1rZXkta2V5LWtleQ==")
 	t.Setenv(RedisPasswordEnv, "")
 	t.Setenv(RedisPasswordEnv+"_FILE", "")
-	origOpen := openTTY
-	defer func() { openTTY = origOpen }()
-	openTTY = func() (io.ReadWriteCloser, error) {
-		t.Fatal("optional redis password must not prompt on TTY")
-		return nil, os.ErrNotExist
-	}
 	cfg := &Config{}
 	cfg.Session.Store = SessionStoreRedis
 	if err := cfg.ResolveSecrets(); err != nil {
@@ -929,12 +880,3 @@ func TestLoadMemoryStoreIgnoresRedis(t *testing.T) {
 		t.Errorf("redis_url = %q, want empty for memory store", cfg.Session.RedisURL)
 	}
 }
-
-type fakeTTY struct {
-	rd *strings.Reader
-	wb strings.Builder
-}
-
-func (f *fakeTTY) Read(p []byte) (int, error)  { return f.rd.Read(p) }
-func (f *fakeTTY) Write(p []byte) (int, error) { return f.wb.Write(p) }
-func (f *fakeTTY) Close() error                { return nil }

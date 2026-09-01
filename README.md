@@ -104,11 +104,11 @@ chain:
 1. env var (`LDAPADM_SESSION_KEY`, `LDAPADM_REDIS_PASSWORD`,
    `LDAPADM_AUTO_NUMBER_PASSWORD`)
 2. a 0600 file referenced by the `_FILE` variant
-3. interactive TTY prompt (fails fast when no TTY is available)
 
 `LDAPADM_BIND_PASSWORD` is deprecated and ignored: the bind credential is
 entered on the login page, verified against the directory, and stored
-encrypted in the session.
+encrypted in the session. There is no interactive fallback: missing secrets
+fail fast at startup, as a server process should.
 
 ## Deployment models
 

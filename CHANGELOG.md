@@ -3,6 +3,14 @@
 All notable changes to ldapact v1 are tracked here, one entry per implementation
 unit (see `docs/plans/2026-08-24-001-feat-ldapact-v1-implementation-plan.md`).
 
+## Secret resolution without TTY prompt (2026-09-01)
+
+- `refactor(config)` — ldapact is a server process, so secret resolution no
+  longer falls back to an interactive TTY prompt. Secrets come from env vars
+  or 0600 files only; a missing secret fails fast at startup with an error
+  naming the variable and its `_FILE` reference. `golang.org/x/term` is no
+  longer a dependency. README/OPERATIONS/.env.example/AGENTS.md updated.
+
 ## External session store and login gate (2026-08-31)
 
 One entry per implementation unit of

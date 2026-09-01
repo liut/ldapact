@@ -2,12 +2,15 @@
 
 ## Secrets
 
-The resolver chain (env → 0600 file → TTY) applies to `LDAPADM_SESSION_KEY`
+The resolver chain (env → 0600 file) applies to `LDAPADM_SESSION_KEY`
 (required), and optionally `LDAPADM_REDIS_PASSWORD` and
 `LDAPADM_AUTO_NUMBER_PASSWORD`. `LDAPADM_BIND_PASSWORD` is deprecated and
 ignored — the bind credential is entered on the login page and stored
 encrypted in the session. No secret ever appears in config files, in
-`/proc/PID/environ`, or in logs (truncated fingerprints only).
+`/proc/PID/environ`, or in logs (truncated fingerprints only). There is no
+interactive TTY prompt: ldapact is a server process, so a missing secret
+fails fast at startup with an error naming the variable and its `_FILE`
+reference.
 
 Examples:
 
@@ -23,8 +26,7 @@ credentials can no longer be decrypted): users simply re-login — this is an
 accepted tradeoff for short-lived admin sessions.
 
 `LDAPADM_REDIS_PASSWORD` is optional: Redis without auth is allowed, and the
-resolver skips the TTY prompt when the variable and file reference are both
-absent.
+resolver returns empty when the variable and file reference are both absent.
 
 ### Moving from YAML to env
 

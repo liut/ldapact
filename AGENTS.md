@@ -112,8 +112,10 @@ parse failure at startup — don't weaken that.
 ### Config and secrets
 
 - All runtime config comes from `LDAPADM_*` env vars via envconfig; no config file.
-- Secrets (bind / auto-number password) resolve: env var → file (mode must be
-  `0600`) → interactive TTY prompt. Never put secrets in config structs or logs.
+- Secrets (`LDAPADM_SESSION_KEY`, Redis / auto-number passwords) resolve:
+  env var → file (mode must be `0600`) only. There is no interactive TTY
+  prompt — this is a server process, and a missing secret fails fast at
+  startup. Never put secrets in config structs or logs.
 - Unknown `LDAPADM_*` variables are ignored; a set-but-empty value is parsed
   as-is (numeric/boolean fields fail at parse time naming the variable).
 
